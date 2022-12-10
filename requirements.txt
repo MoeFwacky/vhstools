@@ -1,0 +1,12 @@
+alive_progress==2.4.1
+ffmpeg==1.4
+ffmpeg_python==0.2.0
+imutils==0.5.4
+mastodon==0.0.1
+Mastodon.py==1.8.0
+numpy==1.23.1
+opencv_python==4.6.0.66
+PyTumblr==0.1.0
+pytz==2022.2.1
+scenedetect==0.6.0.3
+tweepy==4.10.1
