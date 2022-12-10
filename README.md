@@ -1,2 +1,2 @@
-# vid2social
-A python script that automatically grabs clips from a random video file in a directory and posts it to various social media platforms at defined interevals
+# videotools
+A set of python scripts with various video tools, including editing, automatic scene detection and splitting, and posting random clips to social media platforms
