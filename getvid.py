@@ -29,8 +29,9 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
 
-vhs_json_file = config['files']['json file']
-directory = config['files']['video directory']
+vhs_json_file = config['social']['json file']
+directory = config['social']['video directory']
+temp_directory = config['social']['temp directory']
 scene_rgb = int(config['social']['rgb threshold'])
 loop_time = int(config['social']['time between'])
 clip_length = int(config['social']['clip minimum'])
@@ -75,16 +76,21 @@ def get_frame(json_filename, frameRate=30, scene_rgb=scene_rgb,clip_length=int(c
             rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
             print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
             #start_frame = random_frame
-            while not (json_data['frames'][random_frame-2]['rgb'] > json_data['frames'][random_frame-1]['rgb'] > json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] < json_data['frames'][random_frame+2]['rgb']):
-                random_frame = random_frame + 1
-                print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                try:
-                    selected_frame_data = json_data['frames'][random_frame]
-                    rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                except IndexError as e:
-                    selected_frame_data = json_data['frames'][random_frame-1]
-                    rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                    break
+            try:
+                while not (json_data['frames'][random_frame-2]['rgb'] > json_data['frames'][random_frame-1]['rgb'] > json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] < json_data['frames'][random_frame+2]['rgb']):
+                    random_frame = random_frame + 1
+                    print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                    try:
+                        selected_frame_data = json_data['frames'][random_frame]
+                        rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                    except IndexError as e:
+                        selected_frame_data = json_data['frames'][random_frame-1]
+                        rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        break
+            except IndexError as e:
+                selected_frame_data = json_data['frames'][random_frame-1]
+                rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                break
         print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\n')
         start_frame = random_frame
         while random_frame <= (start_frame + minimum_clip_frames):
@@ -110,7 +116,7 @@ def get_video(filename,start,end,crf=11):
     (
         ffmpeg
         .input(filename, ss=start, to=end)
-        .output(scriptPath+delimeter+'clip.mp4', vcodec='libx264', preset='veryfast', crf=crf, acodec='aac', loglevel="quiet")
+        .output(temp_directory+delimeter+'clip.mp4', vcodec='libx264', preset='veryfast', crf=crf, acodec='aac', loglevel="quiet")
         .run(overwrite_output=True)
     )
 
@@ -119,7 +125,7 @@ def render_video(filename,start,end,crf=22):
     (
         ffmpeg
         .input(filename, ss=start, to=end)
-        .output(scriptPath+delimeter+'newclip.mp4', vcodec='libx264', preset='veryfast', crf=crf, acodec='aac', loglevel="quiet")
+        .output(temp_directory+delimeter+'newclip.mp4', vcodec='libx264', preset='veryfast', crf=crf, acodec='aac', loglevel="quiet")
         .run()
     )
 
@@ -128,7 +134,7 @@ def get_audio(filename,start,end):
     (
         ffmpeg
         .input(filename, ss=start, t=clip_length)
-        .output(scriptPath+delimeter+'clip.wav', map='a', loglevel="quiet")
+        .output(temp_directory+delimeter+'clip.wav', map='a', loglevel="quiet")
         .run()
     )
 
@@ -173,7 +179,7 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
         all_videos = []
         try:
             print("LOADING persist.csv")
-            with open(scriptPath+delimeter+'persist.csv', newline="") as csvfile:
+            with open(temp_directory+delimeter+'persist.csv', newline="") as csvfile:
                 csvData = csvfile.readlines()
                 csvData = csvData[0].split(',')
             for d in csvData:
@@ -259,9 +265,9 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
         total_frames = int(last_frame['f'])-int(frame['f'])
         print("DURATION: ",round(total_frames/int(video_data[0]),2),"SECONDS\n")
         get_video(video_filename,frame['ts'],last_frame['ts'],crf=22)
-        file_size = os.path.getsize(scriptPath+delimeter+"clip.mp4")
+        file_size = os.path.getsize(temp_directory+delimeter+"clip.mp4")
         print("\nCLIP SIZE:", round(file_size/1024/1024,2), "megabytes")
-        clip_duration = get_duration(scriptPath+delimeter+'clip.mp4',int(video_data[0]))
+        clip_duration = get_duration(temp_directory+delimeter+'clip.mp4',int(video_data[0]))
         print("CLIP LENGTH:", round(clip_duration,2), "SECONDS")
         loops = 0
         while file_size > file_max*1024*1024:
@@ -276,15 +282,15 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
                     print("FILE SIZE EXCEEDS MAXIMUM OF",file_max,"MEGABYTES BY",round(size_over/1024,2),"KILOBYTES")
             else:
                 print("FILE SIZE EXCEEDS MAXIMUM OF",file_max,"MEGABYTES BY",round(size_over_mb,2),"MEGABYTES")
-            clip_duration = get_duration(scriptPath+delimeter+'clip.mp4',int(video_data[0]))
+            clip_duration = get_duration(temp_directory+delimeter+'clip.mp4',int(video_data[0]))
             bytes_per_second = round(file_size/clip_duration)
             time_over = round(size_over/bytes_per_second)
             print("REDUCING CLIP BY",time_over,"SECONDS")
-            render_video(scriptPath+delimeter+'clip.mp4',0,clip_duration-time_over,crf=22)
-            os.remove(scriptPath+delimeter+'clip.mp4')
-            os.rename(scriptPath+delimeter+'newclip.mp4',scriptPath+delimeter+'clip.mp4')
-            file_size = os.path.getsize(scriptPath+delimeter+"clip.mp4")
-            clip_duration = get_duration(scriptPath+delimeter+'clip.mp4')
+            render_video(temp_directory+delimeter+'clip.mp4',0,clip_duration-time_over,crf=22)
+            os.remove(temp_directory+delimeter+'clip.mp4')
+            os.rename(temp_directory+delimeter+'newclip.mp4',temp_directory+delimeter+'clip.mp4')
+            file_size = os.path.getsize(temp_directory+delimeter+"clip.mp4")
+            clip_duration = get_duration(temp_directory+delimeter+'clip.mp4')
             print("\nCLIP SIZE:", round(file_size/1024/1024,4), "megabytes")
             print("CLIP LENGTH:", round(clip_duration,1), "SECONDS")
 
@@ -293,7 +299,7 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
         success, image = video.read()
         if success:
             resized_image = cv2.resize(image, (640,480))
-            cv2.imwrite(scriptPath+delimeter+"thumbnail.png", resized_image)
+            cv2.imwrite(temp_directory+delimeter+"thumbnail.png", resized_image)
 
         if twitter != False:
             tweets = api.user_timeline(screen_name=twitter_username, count=1) #get last tweet
@@ -350,14 +356,14 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
             print("TWEET:\n"+tweet,end='\n')
             try:
                 print("UPLOADING VIDEO TO TWITTER")
-                media = api.chunked_upload(scriptPath+delimeter+"clip.mp4",media_category="tweet_video")
+                media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")
             except Exception as e:
                 print("ERROR: COULD NOT UPLOAD VIDEO TO TWITTER")
                 print(e)
                 time.sleep(10)
                 try:
                     print("UPLOADING VIDEO TO TWITTER AGAIN")
-                    media = api.chunked_upload(scriptPath+delimeter+"clip.mp4",media_category="tweet_video")        
+                    media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")        
                 except Exception as e:
                     print("ERROR: COULD NOT UPLOAD VIDEO TO TWITTER")
                     print(e)
@@ -374,7 +380,7 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
                 print("SENDING TO TUMBLR")
                 caption = tumblrCaption
                 tags = hashtags
-                tumblr_post = tumblr_client.create_video('foundonvhs',caption=caption,tags=tags,data=scriptPath+delimeter+"clip.mp4")
+                tumblr_post = tumblr_client.create_video('foundonvhs',caption=caption,tags=tags,data=temp_directory+delimeter+"clip.mp4")
             except Exception as e:
                 print("ERROR: COULD NOT POST VIDEO TO TUMBLR")
                 print(e)
@@ -388,11 +394,11 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
             try:
                 print("UPLOADING VIDEO TO MASTODON")
                 mastodon_media = mastodon_client.media_post(
-                    scriptPath+delimeter+"clip.mp4",
+                    temp_directory+delimeter+"clip.mp4",
                     mime_type='video/mp4',
                     description="Random video clip from a digitized VHS tape",
                     focus=(0,-0.333),
-                    thumbnail=scriptPath+delimeter+"thumbnail.png",
+                    thumbnail=temp_directory+delimeter+"thumbnail.png",
                     thumbnail_mime_type='image/png'
                 )
             except Exception as e:
@@ -436,10 +442,10 @@ def social(videos, twitter=False,tumblr=False,useMastodon=False,persist=False):
             print("VIDEO NOT UPLOADED, SKIPPING TOOT")
 
         print("CLEANING UP FILES")
-        with open(scriptPath+delimeter+'persist.csv', 'w') as persistFile:
+        with open(temp_directory+delimeter+'persist.csv', 'w') as persistFile:
             persistFile.write(','.join(all_videos))
-        os.remove(scriptPath+delimeter+'clip.mp4')
-        os.remove(scriptPath+delimeter+'thumbnail.png')
+        os.remove(temp_directory+delimeter+'clip.mp4')
+        os.remove(temp_directory+delimeter+'thumbnail.png')
         print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
         print("RESTARTING LOOP\n")
         time.sleep(5)
