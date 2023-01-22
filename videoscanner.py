@@ -65,7 +65,10 @@ def formatDuration(file):
 
 def getFrameRateDuration(file):
     fileProbe = ffmpeg.probe(file)
-    avgFrameRate = fileProbe['streams'][0]['avg_frame_rate'].split('/')
+    try:
+        avgFrameRate = fileProbe['streams'][0]['avg_frame_rate'].split('/')
+    except:
+        avgFrameRate = 30
     frameRate = int(avgFrameRate[0])/int(avgFrameRate[1])
     durationSeconds = float(fileProbe['format']['duration'])
     durationFormatted = convert(durationSeconds)

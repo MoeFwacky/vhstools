@@ -1,5 +1,6 @@
 import argparse
 import os
+import ray
 
 print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
@@ -14,12 +15,15 @@ print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 #print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 
 parser = argparse.ArgumentParser()
+parser.add_argument('-b', '--bot', action='store_true', help="Bot that listens for submissions of video clip information")
+parser.add_argument('-fb', '--facebook', action='store_true', help="Automatically post video clips to Facebook")
 parser.add_argument('-tw', '--twitter', action='store_true', help="Automatically post video clips to Twitter")
 parser.add_argument('-tb', '--tumblr', action='store_true', help="Automatically post video clips to Tumblr")
 parser.add_argument('-m', '--mastodon', action='store_true', help="Automatically post video clips to Mastodon")
+parser.add_argument('-ds', '--discord', action='store_true', help="Automatically post video clips to Discord")
 parser.add_argument('-sc', '--scanner', action='store_true', help="Scan video file(s) and generate json data file(s)")
 parser.add_argument('-sp', '--splitter', action='store_true', help="Detect dip-to-black in video file(s) and save clips to folder")
-parser.add_argument('-e', '--editor', action='store_true', help="Process video edits as defind in a JSON file")
+parser.add_argument('-e', '--editor', action='store_true', help="Process video edits as defined in a JSON file")
 parser.add_argument('-t', '--tagger', action='store_true', help="Add metadata to videos by parsing JSON data")
 parser.add_argument('-fn', '--filename', type=str, help="Name of the video file in the working directory (including extension)")
 parser.add_argument('-fp', '--filepath', type=str, help="Full path of the video file (Windows paths use double backlash)")
@@ -58,23 +62,78 @@ if args.scanner != False:
                 videoscanner.scanVideo(entry.name, args.directory)
     else:
         videoscanner.scanVideo()
-elif args.twitter != False or args.tumblr != False or args.mastodon != False:
+elif args.twitter != False or args.tumblr != False or args.mastodon != False or args.discord != False or args.facebook != False or args.bot != False:
     import getvid
-    print(":::::::: _   _ _     _  _____  _____            _       _ :::::::::")
-    print("::::::::| | | (_)   | |/ __  \/  ___|          (_)     | |:::::::::")
-    print("::::::::| | | |_  __| |`' / /'\ `--.  ___   ___ _  __ _| |:::::::::")
-    print("::::::::| | | | |/ _` |  / /   `--. \/ _ \ / __| |/ _` | |:::::::::")
-    print("::::::::\ \_/ / | (_| |./ /___/\__/ / (_) | (__| | (_| | |:::::::::")
-    print(":::::::: \___/|_|\__,_|\_____/\____/ \___/ \___|_|\__,_|_|:::::::::")
-    print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
-    if args.filename != None:
-        getvid.social([args.filename],args.twitter, args.tumblr, args.mastodon, args.persist)
-    elif args.filepath != None:
-        getvid.social([args.filepath],args.twitter, args.tumblr, args.mastodon, args.persist)
-    elif args.directory != None:
-        getvid.social(getvid.list_videos(args.directory),args.twitter, args.tumblr, args.mastodon, args.persist)
+    if args.bot == False:
+        print(":::::::: _   _ _     _  _____  _____            _       _ :::::::::")
+        print("::::::::| | | (_)   | |/ __  \/  ___|          (_)     | |:::::::::")
+        print("::::::::| | | |_  __| |`' / /'\ `--.  ___   ___ _  __ _| |:::::::::")
+        print("::::::::| | | | |/ _` |  / /   `--. \/ _ \ / __| |/ _` | |:::::::::")
+        print("::::::::\ \_/ / | (_| |./ /___/\__/ / (_) | (__| | (_| | |:::::::::")
+        print(":::::::: \___/|_|\__,_|\_____/\____/ \___/ \___|_|\__,_|_|:::::::::")
+        print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+        if args.filename != None:
+            getvid.social([args.filename],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+        elif args.filepath != None:
+            getvid.social([args.filepath],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+        elif args.directory != None:
+            getvid.social(getvid.list_videos(args.directory),args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+        else:
+            getvid.social(getvid.list_videos(getvid.directory),args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
     else:
-        getvid.social(getvid.list_videos(getvid.directory),args.twitter, args.tumblr, args.mastodon, args.persist)
+        import listentosocial
+        if args.twitter != False or args.tumblr != False or args.mastodon != False or args.discord != False or args.facebook != False:
+            print("::::: _______              __         __ ______         __   ::::::")
+            print(":::::|     __|.-----.----.|__|.---.-.|  |   __ \.-----.|  |_ ::::::")
+            print(":::::|__     ||  _  |  __||  ||  _  ||  |   __ <|  _  ||   _|::::::")
+            print(":::::|_______||_____|____||__||___._||__|______/|_____||____|::::::")
+            print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+            ray.init()
+            if args.filename != None:
+                @ray.remote
+                def raySocial():
+                    getvid.social([args.filename],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+            elif args.filepath != None:
+                @ray.remote
+                def raySocial():
+                    getvid.social([args.filepath],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+            elif args.directory != None:
+                @ray.remote
+                def raySocial():
+                    vidList = getvid.list_videos(args.directory)
+                    getvid.social(vidList,args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+            else:
+                @ray.remote
+                def raySocial():
+                    vidList = getvid.list_videos(getvid.directory)
+                    getvid.social(vidList,args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
+            rayList = []
+            rayList.append(raySocial.remote())
+            if args.discord != False:
+                @ray.remote
+                def DiscordBot():
+                    listentosocial.checkDiscord()
+                rayList.append(DiscordBot.remote())
+            #for i in range(0,250):
+            if args.twitter != False:
+                @ray.remote
+                def TwitterBot():
+                    listentosocial.checkTwitter()
+                rayList.append(TwitterBot.remote())
+            try:
+                ray.get(rayList)
+            except Exception as e:
+                print(e)
+                #continue
+            #    break
+        else:
+            print("::::::::██    ██ ██   ██ ███████ ██████   ██████  ████████:::::::::")
+            print("::::::::██    ██ ██   ██ ██      ██   ██ ██    ██    ██   :::::::::")
+            print("::::::::██    ██ ███████ ███████ ██████  ██    ██    ██   :::::::::")
+            print(":::::::: ██  ██  ██   ██      ██ ██   ██ ██    ██    ██   :::::::::")
+            print("::::::::  ████   ██   ██ ███████ ██████   ██████     ██   :::::::::")
+            print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+            listentosocial.checkTwitter()
 elif args.splitter != False:
     import scenesplitter
     print(":::::::::  __                   __                        :::::::::")

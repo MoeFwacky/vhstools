@@ -5,7 +5,6 @@ import inspect
 import json
 import os
 import sys
-import scenedetect
 import time
 import videoscanner
 from alive_progress import alive_bar
@@ -133,12 +132,16 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                             last_frame_data = json_data['frames'][frame]
                             rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                        
                     elif frame > totalFrames-2:
-                        while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb']):
-                            frame += 1
-                            bar()
-                            #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                            last_frame_data = json_data['frames'][frame]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                                            
+                        try:
+                            while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb']):
+                                frame += 1
+                                bar()
+                                #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                                last_frame_data = json_data['frames'][frame]
+                                rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                                            
+                        except IndexError:
+                            last_frame_data = json_data['frames'][frame-1]
+                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                            
                     else:
                         try:
                             while not (json_data['frames'][frame-2]['rgb'] > json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']):
