@@ -14,6 +14,7 @@ import os
 import pytumblr
 import pytz
 import random
+import ray
 import requests
 import sys
 import time
@@ -42,6 +43,14 @@ clip_length = int(config['social']['clip minimum'])
 clip_maximum = int(config['social']['clip maximum'])
 file_max = int(config['social']['file size maximum'])
 buffer_frames = [int(config['social']['front buffer']),int(config['social']['end buffer'])]
+
+def next_thirty():
+    current_time = time.time()
+    next_half_hour = (current_time // 1800 + 1) * 1800
+    if next_half_hour < 0:
+        next_half_hour = 0
+    wait_time = next_half_hour - current_time
+    return next_half_hour, wait_time
 
 def list_videos(directory):
     all_videos = []
@@ -164,8 +173,8 @@ def get_duration(filename,frameRate=30):
 
 def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,useDiscord=False,persist=False):
     if facebook != False:
-        page_access_token = config['facebook']['access token']
-        page_id = config['facebook']['page id']
+        fb_page_access_token = config['facebook']['access token']
+        fb_page_id = config['facebook']['page id']
         
     if twitter != False:
         twitter_username = config['twitter']['username']
@@ -234,19 +243,27 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
         airDateLong = None
         airDateShort = None
         breakloop = False
-        if int(len(all_videos)) < 1:
-            all_videos = videos
-        try:
+        if int(len(all_videos)) <= 1:
+            all_videos = list_videos(directory)
+            print("SELECTING VIDEO FROM", len(all_videos), "VIDEO FILES")
             video_filename = random.choice(all_videos)
-        except IndexError as e:
-            all_videos = videos
-            video_filename = random.choice(videos)
-        print("SELECTING VIDEO FROM", len(all_videos), "VIDEO FILES")
-        tape_name = video_filename.split(delimeter)[-1]
-        tape_name = tape_name.split('.')[0]
+        else:
+            try:
+                print("SELECTING VIDEO FROM", len(all_videos), "VIDEO FILES")
+                video_filename = random.choice(all_videos)
+            except IndexError as e:
+                all_videos = videos
+                video_filename = random.choice(videos)
+        
+        if "http" not in video_filename:
+            tape_name = video_filename.split(delimeter)[-1]
+            tape_name = tape_name.split('.')[0]
+        else:
+            tape_name = video_filename.split('/')[-1]
+            tape_name = tape_name.split('.')[0]            
         print(tape_name,"SELECTED!")
-        json_filename = video_filename.replace('.mp4','.json')
-
+        json_filename = directory+delimeter+tape_name+'.json'
+        #print(json_filename)
         if os.path.exists(json_filename) == False:
             print("JSON DATA FILE NOT FOUND, SCANNING",tape_name)
             filePathArray = video_filename.split(delimeter)
@@ -362,6 +379,7 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
             time_over = round(size_over/bytes_per_second)
             print("REDUCING CLIP BY",time_over,"SECONDS")
             render_video(temp_directory+delimeter+'clip.mp4','newclip.mp4',0,clip_duration-time_over,crf=22)
+
             os.remove(temp_directory+delimeter+'clip.mp4')
             os.rename(temp_directory+delimeter+'newclip.mp4',temp_directory+delimeter+'clip.mp4')
             file_size = os.path.getsize(temp_directory+delimeter+"clip.mp4")
@@ -376,25 +394,13 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
             resized_image = cv2.resize(image, (640,480))
             cv2.imwrite(temp_directory+delimeter+"thumbnail.png", resized_image)
 
-        if twitter != False:
-            tweets = api.user_timeline(screen_name=twitter_username, count=1) #get last tweet
-            last_tweet = tweets[0]
-            last_tweet_timestamp = last_tweet.created_at
-            if datetime.now(pytz.utc) < last_tweet_timestamp+timedelta(minutes=loop_time):
-                print("\nLAST TWEET WAS: " + str(last_tweet_timestamp.astimezone(pytz.timezone('US/Pacific'))))
-                time_to_sleep = (last_tweet_timestamp+timedelta(minutes=loop_time))-datetime.now(pytz.utc)-timedelta(minutes=5)
-                if time_to_sleep.total_seconds() > 0:
-                    print("SLEEPING UNTIL "+str(time_to_sleep+datetime.now())+"\n")
-                    time.sleep(time_to_sleep.total_seconds())
-        else:
-            #note: add other social platforms to check for last post
-            time_to_sleep = ((loop_time-5)*60)
-            #time_to_sleep = 5
-            if time_to_sleep > 0:
-                print("SLEEPING UNTIL "+str(datetime.now()+timedelta(seconds=time_to_sleep))+"\n")
-                time.sleep(time_to_sleep)
-            dosleep = True
-        
+        times = next_thirty()
+        print("SLEEPING UNTIL",time.ctime(times[0]))
+        try:
+            time.sleep(times[1])
+        except ValueError as e:
+            print(e)
+
         hashtags = ['#VHS','#retromedia']
         try:
             stationList = station.split('/')
@@ -422,184 +428,234 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
             #print(e)
             hashtags = hashtags
             
-
+        rays = []
+        returns = 0
         if twitter != False:
-            blocking_statuses = ['pending', 'in_progress']
-            try:
-                tweet = tapeID+"\n"+frame['ts'].split('.')[0]+"\n"+program+"\n"+station+"\n"+airDateShort+"\n"+hashtagString
-            except:
-                tweet = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+hashtagString
-            if len(tweet) > 280:
-                tweet = +tapeID+"\n"+frame['ts'].split('.')[0]+"\n"+program+"\n"+station+"\n"+airDateShort+"\n"+hashtagString
-
-            try:
-                print("UPLOADING VIDEO TO TWITTER")
-                media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")
-            except Exception as e:
-                print("ERROR: COULD NOT UPLOAD VIDEO TO TWITTER")
-                print(e)
-                time.sleep(10)
+            @ray.remote
+            def tw():
+                blocking_statuses = ['pending', 'in_progress']
                 try:
-                    print("UPLOADING VIDEO TO TWITTER AGAIN")
-                    media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")        
+                    tweet = tapeID+"\n"+frame['ts'].split('.')[0]+"\n"+program+"\n"+station+"\n"+airDateShort+"\n"+hashtagString
+                except:
+                    tweet = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+hashtagString
+                if len(tweet) > 280:
+                    tweet = +tapeID+"\n"+frame['ts'].split('.')[0]+"\n"+program+"\n"+station+"\n"+airDateShort+"\n"+hashtagString
+
+                try:
+                    print("UPLOADING VIDEO TO TWITTER")
+                    media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")
                 except Exception as e:
                     print("ERROR: COULD NOT UPLOAD VIDEO TO TWITTER")
                     print(e)
-                    media = None
+                    time.sleep(10)
+                    try:
+                        print("UPLOADING VIDEO TO TWITTER AGAIN")
+                        media = api.chunked_upload(temp_directory+delimeter+"clip.mp4",media_category="tweet_video")        
+                    except Exception as e:
+                        print("ERROR: COULD NOT UPLOAD VIDEO TO TWITTER")
+                        print(e)
+                        media = None
+                if media != None:
+                    #checking if file is still processing
+                    blocking_statuses = ['pending', 'in_progress']
+                    if (hasattr(media, 'processing_info') and media.processing_info['state'] in blocking_statuses):
+                        check_after = media.processing_info['check_after_secs']
+                        print("WAITING FOR TWITTER UPLOAD TO COMPLETE AT",datetime.datetime.now()+datetime.timedelta(seconds=check_after))
+                        #print("SLEEPING UNTIL "+str(datetime.now()+timedelta(seconds=check_after))+"\n")
+                        time.sleep(check_after)
+                    '''if datetime.now(pytz.utc) < last_tweet_timestamp+timedelta(minutes=loop_time):
+                        time_to_sleep = (last_tweet_timestamp+timedelta(minutes=loop_time))-datetime.now(pytz.utc)
+                        print("\nSLEEPING UNTIL "+str(time_to_sleep+datetime.now())+"\n")
+                        time.sleep(time_to_sleep.total_seconds())'''
+                    try:
+                        print("SENDING TWEET")
+                        post_result = api.update_status(status=tweet, media_ids=[media.media_id])
+                        #print(tape_name[0:7]+": "+frame['ts']+"\n")
+                    except Exception as e:
+                        print("ERROR: COULD NOT TWEET VIDEO")
+                        print(e)
+                else:
+                    print("VIDEO NOT UPLOADED, SKIPPING TWEET")
+            returns += 1
+            rays.append(tw.remote())
+            #return True
 
         if tumblr != False:
-            try:
-                tumblrCaption = "Tape ID: "+tapeID+"<br>Timestamp: "+frame['ts'].split('.')[0]+"<br>Program: "+program+"<br>Network/Station: "+station+"<br>Broadcast Location: "+location+"<br>Air Date: "+airDateLong
-            except:
-                tumblrCaption = "Tape ID: "+tape_name[0:7]+"<br>Timestamp: "+frame['ts'].split('.')[0]
+            @ray.remote
+            def tb():
+                try:
+                    tumblrCaption = "Tape ID: "+tapeID+"<br>Timestamp: "+frame['ts'].split('.')[0]+"<br>Program: "+program+"<br>Network/Station: "+station+"<br>Broadcast Location: "+location+"<br>Air Date: "+airDateLong
+                except:
+                    tumblrCaption = "Tape ID: "+tape_name[0:7]+"<br>Timestamp: "+frame['ts'].split('.')[0]
 
-            #print("\nTUMBLR:\n"+tumblrCaption)
-            try:
-                print("SENDING TO TUMBLR")
-                caption = tumblrCaption
-                tags = hashtags
-                tumblr_post = tumblr_client.create_video('foundonvhs',caption=caption,tags=tags,data=temp_directory+delimeter+"clip.mp4")
-            except Exception as e:
-                print("ERROR: COULD NOT POST VIDEO TO TUMBLR")
-                print(e)
-        
-        if useMastodon != False:
-            try:
-                mastodonCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong+"\n"+"#bot "+hashtagString
-            except:
-                mastodonCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+"#bot "+hashtagString
-            #print("\nMASTODON:\n"+mastodonCaption)
-            try:
-                print("UPLOADING VIDEO TO MASTODON")
-                mastodon_media = mastodon_client.media_post(
-                    temp_directory+delimeter+"clip.mp4",
-                    mime_type='video/mp4',
-                    description="Random video clip from a digitized VHS tape",
-                    focus=(0,-0.333),
-                    thumbnail=temp_directory+delimeter+"thumbnail.png",
-                    thumbnail_mime_type='image/png'
-                )
-            except Exception as e:
-                print("ERROR: COULD NOT UPLOAD VIDEO TO MASTODON")
-                print(e)
-                mastodon_media = None
-
-        if useDiscord != False:
-            crfValue = 28
-            render_video(temp_directory+delimeter+'clip.mp4','foundonvhs.mp4',0,clip_duration,crf=crfValue)
-            new_file_size = os.path.getsize(temp_directory+delimeter+"foundonvhs.mp4")
-            while new_file_size > 8*1024*1024:
-                loops = loops + 1
-                size_over = new_file_size - 8*1024*1024
-                size_over_kb = size_over/1024
-                size_over_mb = size_over_kb/1024
-                if size_over_mb < 1:
-                    if size_over_kb < 1:
-                        print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over,2),"BYTES")
-                    else:
-                        print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over/1024,2),"KILOBYTES")
-                else:
-                    print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over_mb,2),"MEGABYTES")
-                clip_duration = get_duration(temp_directory+delimeter+'foundonvhs.mp4',int(video_data[0]))
-                bytes_per_second = round(file_size/clip_duration)
-                crfValue=crfValue+math.ceil(size_over_mb*.75)
-                print("INCREASING CRF VALUE TO",crfValue)
-                render_video(temp_directory+delimeter+'clip.mp4','foundonvhs.mp4',0,clip_duration,crf=crfValue)
-                new_file_size = os.path.getsize(temp_directory+delimeter+"foundonvhs.mp4")
-                print("\nCLIP SIZE:", round(new_file_size/1024/1024,4), "megabytes")
-
-            try:
-                discordCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nDuration: "+str(round(clip_duration,1))+" Seconds"+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong
-            except:
-                discordCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nDuration: "+str(round(clip_duration,1))+" Seconds"
-            print("SENDING VIDEO TO DISCORD")
-            discord_intents=discord.Intents.default()
-            discord_intents.message_content=True
-            discord_client=discord.Client(intents=discord_intents)
-            
-            @discord_client.event
-            async def on_ready():
-                for discord_channel in discord_channels:
-                    channel = discord_client.get_channel(int(discord_channel))
-                    await channel.send(discordCaption,file=discord.File(temp_directory+delimeter+'foundonvhs.mp4'))
-                await discord_client.close()
-            try:
-                discord_client.run(discord_token, log_handler=None)
-            except Exception as e:
-                print("ERROR: COULD NOT SEND VIDEO TO DISCORD")
-                print(e)
-            os.remove(temp_directory+delimeter+'foundonvhs.mp4')
+                #print("\nTUMBLR:\n"+tumblrCaption)
+                try:
+                    print("SENDING TO TUMBLR")
+                    caption = tumblrCaption
+                    tags = hashtags
+                    tumblr_post = tumblr_client.create_video('foundonvhs',caption=caption,tags=tags,data=temp_directory+delimeter+"clip.mp4")
+                except Exception as e:
+                    print("ERROR: COULD NOT POST VIDEO TO TUMBLR")
+                    print(e)
+            returns += 1
+            rays.append(tb.remote())
+            #return True
 
         if facebook != False:
-            try:
-                facebookCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong+"\n"+hashtagString
-            except:
-                facebookCaption = facebookCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+hashtagString
-            print("\nFACEBOOK:\n"+facebookCaption)
-            try:
-                print("UPLOADING VIDEO TO FACEBOOK")
-                fb_url = 'https://graph-videeo.facebook.com/'+page_id+'/videos?access_token='+str(page_access_token)
-                video_file ={'file':open(temp_directory+delimeter+"clip.mp4",'rb')}
-                fb_flag = requests.post(fb_url, files=video_file).txt
-            except:
-                print("ERROR UPLOADING TO FACEBOOK")
-
-        if twitter != False:
-            if datetime.now(pytz.utc) < last_tweet_timestamp+timedelta(minutes=loop_time):
-                time_to_sleep = (last_tweet_timestamp+timedelta(minutes=loop_time))-datetime.now(pytz.utc)
-                print("\nSLEEPING UNTIL "+str(time_to_sleep+datetime.now())+"\n")
-                time.sleep(time_to_sleep.total_seconds())
-            if media != None:
-                #checking if file is still processing
-                if (hasattr(media, 'processing_info') and
-                        media.processing_info['state'] in blocking_statuses):
-                    check_after = media.processing_info['check_after_secs']
-                    print("TWITTER STILL PROCESSING VIDEO")
-                    print("SLEEPING UNTIL "+str(datetime.now()+timedelta(seconds=check_after))+"\n")
-                    time.sleep(check_after)
+            @ray.remote
+            def fb():
                 try:
-                    print("SENDING TWEET")
-                    post_result = api.update_status(status=tweet, media_ids=[media.media_id])
-                    #print(tape_name[0:7]+": "+frame['ts']+"\n")
-                except Exception as e:
-                    print("ERROR: COULD NOT TWEET VIDEO")
-                    print(e)
-            else:
-                print("VIDEO NOT UPLOADED, SKIPPING TWEET")
-        else:
-            time_to_sleep = (5*60)
-            print("\nSLEEPING UNTIL "+str(datetime.now()+timedelta(seconds=time_to_sleep))+"\n")
-            time.sleep(time_to_sleep)
-            
-        if mastodon != False:
-            if mastodon_media != None:
+                    facebookCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nAir Date: "+airDateLong+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\n"+hashtagString
+                except:
+                    facebookCaption = facebookCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+hashtagString
+                #print("\nFACEBOOK:\n"+facebookCaption)
                 try:
-                    print("SENDING TO MASTODON")
-                    mastodon_client.status_post(mastodonCaption,media_ids=[mastodon_media])
+                    print("UPLOADING VIDEO TO FACEBOOK")
+                    fb_url = 'https://graph.facebook.com/'+fb_page_id+'/videos'
+                    video_file ={'source':open(temp_directory+delimeter+"clip.mp4",'rb')}
+                    fb_payload = {'description':facebookCaption,'access_token':fb_page_access_token}
+                    fb_flag = requests.post(fb_url, files=video_file, data=fb_payload)
+                    video_file['source'].close()
+                    #print(fb_flag.text)
                 except Exception as e:
-                    print("ERROR: COULD NOT POST VIDEO TO MASTODON")
+                    print("ERROR UPLOADING TO FACEBOOK")
                     print(e)
+            returns += 1
+            rays.append(fb.remote())
+            #return True
+        
+        if useMastodon != False:
+            @ray.remote
+            def mast():
+                try:
+                    mastodonCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong+"\n"+"#bot "+hashtagString
+                except:
+                    mastodonCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\n"+"#bot "+hashtagString
+                #print("\nMASTODON:\n"+mastodonCaption)
+                try:
+                    print("UPLOADING VIDEO TO MASTODON")
+                    mastodon_media = mastodon_client.media_post(
+                        temp_directory+delimeter+"clip.mp4",
+                        mime_type='video/mp4',
+                        description="Random video clip from a digitized VHS tape",
+                        focus=(0,-0.333),
+                        thumbnail=temp_directory+delimeter+"thumbnail.png",
+                        thumbnail_mime_type='image/png'
+                    )
+                except Exception as e:
+                    print("ERROR: COULD NOT UPLOAD VIDEO TO MASTODON")
+                    print(e)
+                    mastodon_media = None
+                if mastodon_media != None:
+                    while mastodon_media['url'] == None:
+                        mastodon_media = mastodon_client.media(mastodon_media.id)
+                        #print(mastodon_media)
+                        if mastodon_media.url == None:
+                            print("MASTODON MEDIA URL NOT READY, CHECKING AGAIN IN 10 SECONDS")
+                            time.sleep(10)
+                        else:
+                            print("MASTODON URL READY! POSTING VIDEO TO MASTODON")
+                    try:
+                        mastodon_client.status_post(mastodonCaption,media_ids=[mastodon_media])
+                    except Exception as e:
+                        print("ERROR: COULD NOT POST VIDEO TO MASTODON")
+                        print(e)
+                else:
+                    print("VIDEO NOT UPLOADED, SKIPPING TOOT")
+            returns += 1
+            rays.append(mast.remote())
+            #return True
+
+        if useDiscord != False:
+            @ray.remote
+            def disc(clip_duration=clip_duration):
+                crfValue = 28
+                render_video(temp_directory+delimeter+'clip.mp4','foundonvhs.mp4',0,clip_duration,crf=crfValue)
+                new_file_size = os.path.getsize(temp_directory+delimeter+"foundonvhs.mp4")
+                while new_file_size > 8*1024*1024:
+                    size_over = new_file_size - 8*1024*1024
+                    size_over_kb = size_over/1024
+                    size_over_mb = size_over_kb/1024
+                    if size_over_mb < 1:
+                        if size_over_kb < 1:
+                            print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over,2),"BYTES")
+                        else:
+                            print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over/1024,2),"KILOBYTES")
+                    else:
+                        print("FILE SIZE EXCEEDS DISCORD MAXIMUM OF",8,"MEGABYTES BY",round(size_over_mb,2),"MEGABYTES")
+                    clip_duration = get_duration(temp_directory+delimeter+'foundonvhs.mp4',int(video_data[0]))
+                    bytes_per_second = round(file_size/clip_duration)
+                    crfValue=crfValue+math.ceil(size_over_mb*.75)
+                    print("INCREASING CRF VALUE TO",crfValue)
+                    render_video(temp_directory+delimeter+'clip.mp4','foundonvhs.mp4',0,clip_duration,crf=crfValue)
+                    new_file_size = os.path.getsize(temp_directory+delimeter+"foundonvhs.mp4")
+                    print("\nCLIP SIZE:", round(new_file_size/1024/1024,4), "megabytes")
+
+                try:
+                    discordCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nDuration: "+str(round(clip_duration,1))+" Seconds"+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong
+                except:
+                    discordCaption = "Tape ID: "+tape_name[0:7]+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nDuration: "+str(round(clip_duration,1))+" Seconds"
+                print("SENDING VIDEO TO DISCORD")
+                discord_intents=discord.Intents.default()
+                discord_intents.message_content=True
+                discord_client=discord.Client(intents=discord_intents)
+                
+                @discord_client.event
+                async def on_ready():
+                    for discord_channel in discord_channels:
+                        channel = discord_client.get_channel(int(discord_channel))
+                        await channel.send(discordCaption,file=discord.File(temp_directory+delimeter+'foundonvhs.mp4'))
+                    await discord_client.close()
+                try:
+                    discord_client.run(discord_token, log_handler=None)
+                except Exception as e:
+                    print("ERROR: COULD NOT SEND VIDEO TO DISCORD")
+                    print(e)
+                os.remove(temp_directory+delimeter+'foundonvhs.mp4')
+            returns += 1
+            rays.append(disc.remote())
+            #return True
+
+        try:
+            ray.get(rays)
+            while len(rays) > 0:
+                done, rays = ray.wait(rays)
+            print("ALL SOCIAL POSTING PROCESSES COMPLETE AT", datetime.now())
+            if int(len(all_videos)) <= 1:
+                print("RESETTING VIDEO LIST")
+                all_videos = videos
             else:
-                print("VIDEO NOT UPLOADED, SKIPPING TOOT")
+                all_videos.remove(video_filename)
+                print(len(all_videos),"VIDEO FILES REMAIN")
 
-        '''if len(all_videos) > 1:
-            all_videos.remove(video_filename)
-        else:
-            all_videos = videos'''
+            print("CLEANING UP FILES")
+            if persist != False:
+                with open(temp_directory+delimeter+'persist.csv', 'w') as persistFile:
+                    persistFile.write(','.join(all_videos))
+                with open(temp_directory+delimeter+tape_name+'.csv', 'w') as framesFile:
+                    all_frames = list(map(int, all_frames))
+                    all_frames = list(set(all_frames))
+                    all_frames.sort()
+                    framesFile.write(','.join(str(a) for a in all_frames))
 
-        all_videos.remove(video_filename)
+            try:
+                os.remove(temp_directory+delimeter+'clip.mp4')
+                fileInUse = False
+            except PermissionError as e:
+                fileInUse = True
+            while fileInUse == True:
+                print("VIDEO FILE STILL IN USE, CHECKING AGAIN IN 60 SECONDS")
+                time.sleep(60)
+                try:
+                    os.remove(temp_directory+delimeter+'clip.mp4')
+                    fileInUse = False
+                except PermissionError as e:
+                    fileInUse = True
 
-        print("CLEANING UP FILES")
-        if persist != False:
-            with open(temp_directory+delimeter+'persist.csv', 'w') as persistFile:
-                persistFile.write(','.join(all_videos))
-            with open(temp_directory+delimeter+tape_name+'.csv', 'w') as framesFile:
-                all_frames = list(map(int, all_frames))
-                all_frames = list(set(all_frames))
-                all_frames.sort()
-                framesFile.write(','.join(str(a) for a in all_frames))
-        os.remove(temp_directory+delimeter+'clip.mp4')
-        os.remove(temp_directory+delimeter+'thumbnail.png')
+            os.remove(temp_directory+delimeter+'thumbnail.png')
+        except Exception as e:
+            print(e)
+
         print("\n:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::\n")
         print("RESTARTING LOOP\n")
         time.sleep(5)

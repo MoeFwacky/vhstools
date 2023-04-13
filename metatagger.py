@@ -84,7 +84,7 @@ def editMetadata(filename,outputPath,metadata):
             .output(
                 outputFile, 
                 c='copy', 
-                loglevel="quiet",
+                loglevel="verbose",
                 **{
                     'metadata:g:0':"title="+metadata['description'],
                     'metadata:g:1':"date="+metadata['date'],

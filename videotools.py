@@ -16,6 +16,7 @@ print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-b', '--bot', action='store_true', help="Bot that listens for submissions of video clip information")
+parser.add_argument('-a', '--archive', action='store_true', help="Upload indicated file(s) to the internet archive")
 parser.add_argument('-fb', '--facebook', action='store_true', help="Automatically post video clips to Facebook")
 parser.add_argument('-tw', '--twitter', action='store_true', help="Automatically post video clips to Twitter")
 parser.add_argument('-tb', '--tumblr', action='store_true', help="Automatically post video clips to Tumblr")
@@ -62,6 +63,44 @@ if args.scanner != False:
                 videoscanner.scanVideo(entry.name, args.directory)
     else:
         videoscanner.scanVideo()
+elif args.archive != False:
+    import iauploader
+    print("::::::: █████╗ ██████╗  ██████╗██╗  ██╗██╗██╗   ██╗███████╗::::::::")
+    print(":::::::██╔══██╗██╔══██╗██╔════╝██║  ██║██║██║   ██║██╔════╝::::::::")
+    print(":::::::███████║██████╔╝██║     ███████║██║██║   ██║█████╗  ::::::::")
+    print(":::::::██╔══██║██╔══██╗██║     ██╔══██║██║╚██╗ ██╔╝██╔══╝  ::::::::")
+    print(":::::::██║  ██║██║  ██║╚██████╗██║  ██║██║ ╚████╔╝ ███████╗::::::::")
+    print(":::::::╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝::::::::")
+    print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+    if args.filename != None:
+        print("UPLOADING", args.filename, "to the Internet Archive")
+        iauploader.uploadToArchive([args.filename])
+    elif args.filepath != None:
+        pathArray = args.filepath.split(delimeter)
+        videoFileName = args.filepath.split(delimeter)[-1]
+        pathArray.pop()
+        path = ""
+        for p in pathArray:
+            path = path + p + delimeter
+        print("UPLOADING", videoFileName,"IN DIRECTORY",path,"to the Internet Archive")
+        iauploader.uploadToArchive([args.filepath])
+    elif args.directory != None:
+        dirContents = os.scandir(args.directory)
+        videos = []
+        extensions = ['mp4','avi','m4v','mkv']
+        for entry in dirContents:
+            if entry.name[-3:] in extensions:
+                print(entry)
+                videos.append(entry)
+        if len(videos) > 0:
+            iauploader.uploadToArchive(videos)
+        else:
+            extensions_string = ''
+            for ext in extensions:
+                extensions_string += ', '+ext
+            print("ERROR:",args.directory,"CONTAINS NO VIDEOS OF THE FOLLOWING TYPES:",extensions_string)
+    else:
+        iauploader.uploadToArchive(None)
 elif args.twitter != False or args.tumblr != False or args.mastodon != False or args.discord != False or args.facebook != False or args.bot != False:
     import getvid
     if args.bot == False:
@@ -91,24 +130,24 @@ elif args.twitter != False or args.tumblr != False or args.mastodon != False or 
             ray.init()
             if args.filename != None:
                 @ray.remote
-                def raySocial():
+                def Social():
                     getvid.social([args.filename],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
             elif args.filepath != None:
                 @ray.remote
-                def raySocial():
+                def Social():
                     getvid.social([args.filepath],args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
             elif args.directory != None:
                 @ray.remote
-                def raySocial():
+                def Social():
                     vidList = getvid.list_videos(args.directory)
                     getvid.social(vidList,args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
             else:
                 @ray.remote
-                def raySocial():
+                def Social():
                     vidList = getvid.list_videos(getvid.directory)
                     getvid.social(vidList,args.facebook, args.twitter, args.tumblr, args.mastodon, args.discord, args.persist)
             rayList = []
-            rayList.append(raySocial.remote())
+            rayList.append(Social.remote())
             if args.discord != False:
                 @ray.remote
                 def DiscordBot():
@@ -120,6 +159,11 @@ elif args.twitter != False or args.tumblr != False or args.mastodon != False or 
                 def TwitterBot():
                     listentosocial.checkTwitter()
                 rayList.append(TwitterBot.remote())
+            if args.mastodon != False:
+                @ray.remote
+                def MastodonBot():
+                    listentosocial.checkMastodon()
+                rayList.append(MastodonBot.remote())
             try:
                 ray.get(rayList)
             except Exception as e:
@@ -133,7 +177,7 @@ elif args.twitter != False or args.tumblr != False or args.mastodon != False or 
             print(":::::::: ██  ██  ██   ██      ██ ██   ██ ██    ██    ██   :::::::::")
             print("::::::::  ████   ██   ██ ███████ ██████   ██████     ██   :::::::::")
             print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
-            listentosocial.checkTwitter()
+            listentosocial.checkMastodon()
 elif args.splitter != False:
     import scenesplitter
     print(":::::::::  __                   __                        :::::::::")

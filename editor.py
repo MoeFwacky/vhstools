@@ -231,7 +231,7 @@ def mergeVideos(inFiles,outputName):
         (
             ffmpeg
             .input('merge.tmp', format='concat', safe=0)
-            .output(outputName, vcodec=videoCodec, preset=videoCodecPreset, crf=crfValue, acodec=audioCodec, loglevel="quiet")
+            .output(outputName, vcodec='libx264', loglevel="quiet", preset='fast', crf=11, acodec='aac')
             .run()
         )
     except ffmpeg._run.Error as e:
@@ -260,7 +260,8 @@ def processJSON(JSONfile=None, path=None):
             print(d['input'])
             print(d['output'])
             mergeVideos(d['input'],d['output'])
-    except:
+    except Exception as e:
+        print(e)
         pass
     try:
         for d in jsonData['overlayVideo']:
