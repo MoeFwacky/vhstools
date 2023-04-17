@@ -192,8 +192,10 @@ def processVideo(videoFile=None, path=os.getcwd()):
     frameRate, fileDuration, lengthFormatted = videoscanner.getFrameRateDuration(videoFile)
     totalFrames = float(fileDuration*float(frameRate))
 
-    tape_name = videoFile.split(delimeter)[-1]
-    tape_name = tape_name.split('.')[0]
+    tape_filename = videoFile.split(delimeter)[-1]
+    tape_name_parts = tape_filename.split('.')
+    tape_name = '.'.join(tape_name_parts[:-1])
+    
     #print(tape_name,"SELECTED!")
 
     jsonFileName = tape_name+'.json'
