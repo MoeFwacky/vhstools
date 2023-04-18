@@ -104,7 +104,10 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                 else:
                     frame += 1
                     bar()
-                    start_frame_data = json_data['frames'][frame]
+                    try:
+                        start_frame_data = json_data['frames'][frame]
+                    except IndexError:
+                        break
                     scene_number = scene_number + 1
                 while frame <= (start_frame_data['f'] + minimum_clip_frames):
                     frame += 1
@@ -175,13 +178,22 @@ def processTempFile(file, horizontalResolution, verticalResolution, aspectRatio,
 def saveSplitScene(scene, file, path, startSplit, endSplit):
     fileSplit = file.split('.')
     sceneNumber = "{0:0=5d}".format(scene)
-    outputFileName = fileSplit[0]+"_"+sceneNumber+"."+fileSplit[1]
-    (
-        ffmpeg
-        .input(file, ss=startSplit, to=endSplit)
-        .output(path+outputFileName, c='copy', loglevel="quiet")
-        .run()
-    )
+
+    tape_name_parts = file.split('.')
+    #print('.'.join(tape_name_parts))
+    tape_name = '.'.join(tape_name_parts[:-1])
+    file_extension = tape_name_parts[-1]
+
+    outputFileName = tape_name+"_"+sceneNumber+"."+file_extension
+    try:
+        (
+            ffmpeg
+            .input(file, ss=startSplit, to=endSplit)
+            .output(path+outputFileName, vcodec='libx264', loglevel="error", preset='fast', crf=11, acodec='aac')
+            .run()
+        )
+    except ffmpeg.Error as e:
+        print(e)
 
 def processVideo(videoFile=None, path=os.getcwd()):
     os.chdir(path)
@@ -194,7 +206,9 @@ def processVideo(videoFile=None, path=os.getcwd()):
 
     tape_filename = videoFile.split(delimeter)[-1]
     tape_name_parts = tape_filename.split('.')
+    #print('.'.join(tape_name_parts))
     tape_name = '.'.join(tape_name_parts[:-1])
+    file_extension = tape_name_parts[-1]
     
     #print(tape_name,"SELECTED!")
 
@@ -206,7 +220,8 @@ def processVideo(videoFile=None, path=os.getcwd()):
     if os.path.exists(STATS_FILE) == False:
         print("JSON DATA FILE NOT FOUND, SCANNING",tape_name)
         filePath = path
-        videoscanner.scanVideo(tape_name+'.mp4',filePath)
+        #print(tape_name+file_extension,filePath)
+        videoscanner.scanVideo(tape_name+'.'+file_extension,filePath)
     scene_list = getScenes(STATS_FILE,totalFrames,frameRate)
     
     print("Exporting scene files to "+outputPath)
