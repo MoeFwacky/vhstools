@@ -1,4 +1,3 @@
-import cv2
 import datetime
 import ffmpeg
 import imutils
@@ -7,13 +6,15 @@ import math
 import numpy as np
 import os
 import queue
+import ray
 import statistics
 import sys
-import threading
 import time
 from alive_progress import alive_bar
 from imutils.video import FileVideoStream
 from imutils.video import FPS
+
+frame_queue = queue.Queue(100)
 
 if os.name == 'nt':
     delimeter = '\\'
@@ -130,13 +131,56 @@ def selectVideo():
     print("CONFIRMED!")
     return dirDict[fileSelection], totalFrames, path
 
-def read_frame(video, frame_queue):
-    while True:
-        frame = video.read()
-        if frame is None:
-            break
-        frame_queue.put(frame)
+def read_frame(video, totalFrames):
+    f = 0
+    with alive_bar(int((totalFrames)), force_tty=True) as bar:
+        while f <= totalFrames:
+            frame = video.read()
+            if frame is None:
+                break
+            frame_queue.put(frame)
+            f += 1
+            bar()
 
+def process_frames(videoFile, totalFrames, frameRate):
+    fps = FPS().start()
+    video = FileVideoStream(videoFile).start()
+    file_data = {}
+    file_data['frames'] = []
+    rgb_values = []
+    rgb_min_max = [255,0]
+    f = 0
+    with alive_bar(int((totalFrames)), force_tty=True) as bar:
+        while f < int((totalFrames)):
+            frame = video.read()
+            try:
+                avg_color_per_row = np.average(frame, axis=0)
+                avg_color = np.average(avg_color_per_row, axis=0)
+                b,g,r = avg_color
+                rgb = (0.2126*r)+(0.7152*g)+(0.0722*b)
+                if rgb < rgb_min_max[0]:
+                    rgb_min_max[0] = rgb
+                if rgb > rgb_min_max[1]:
+                    rgb_min_max[1] = rgb
+                rgb_values.append(rgb)
+                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5)}     
+                file_data['frames'].append(frameData)
+                if video.Q.qsize() < 5:  # If we are low on frames, give time to producer
+                    time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient
+            except Exception as e:
+                print(e)
+                pass
+                
+            fps.update()
+            f = f + 1
+            bar()
+        video.stop()
+        fps.stop()
+        print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+        print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+        
+        return file_data, rgb_values, rgb_min_max
+    
 def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
     os.chdir(path)
     if path[-1] != delimeter:
@@ -148,69 +192,21 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
         #print(frameRate, fileDuration, lengthFormatted)
         totalFrames = float(fileDuration*float(frameRate))
     #print(totalFrames)
+    #rayscan = []
     
-    video = FileVideoStream(videoFile).start()
-    frame_queue = queue.Queue(100)
-    t = threading.Thread(target=read_frame, args=(video, frame_queue))
-    t.start()
-    time.sleep(5)
-    fps = FPS().start()
-    f = 0
-    file_data = {}
-    file_data['frames'] = []
-    rgb_values = []
-    rgb_min_max = [255,0]
     
-    with alive_bar(int((totalFrames)), force_tty=True) as bar:
-        while f < int((totalFrames)):
-            if not frame_queue.empty():
-                frame = frame_queue.get()
-                frame_queue.task_done()
-                try:
-                    #print("avg_color_per_row = np.average(frame, axis=0)")
-                    avg_color_per_row = np.average(frame, axis=0)
-                    #print("avg_color = np.average(avg_color_per_row, axis=0)")
-                    avg_color = np.average(avg_color_per_row, axis=0)
-                    #print("b,g,r = avg_color")
-                    b,g,r = avg_color
-                    #print("rgb = (0.2126*r)+(0.7152*g)+(0.0722*b)")
-                    rgb = (0.2126*r)+(0.7152*g)+(0.0722*b)
-                    #print("if rgb < rgb_min_max[0]:")
-                    if rgb < rgb_min_max[0]:
-                        #print("\t rgb_min_max[0] = rgb")
-                        rgb_min_max[0] = rgb
-                    #print("if rgb > rgb_min_max[1]:")
-                    if rgb > rgb_min_max[1]:
-                        #print("\t rgb_min_max[1] = rgb")
-                        rgb_min_max[1] = rgb
-                    #print("rgb_values.append(rgb)")
-                    rgb_values.append(rgb)
-                    #print("frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5)}     ")
-                    frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5)}     
-                    #print("file_data['frames'].append(frameData)")
-                    file_data['frames'].append(frameData)
-                    #print("if video.Q.qsize() < 5:")  # If we are low on frames, give time to producer
-                    if video.Q.qsize() < 5:  # If we are low on frames, give time to producer
-                        #print("\t time.sleep(0.001)")  # Ensures producer runs now, so 2 is sufficient
-                        time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient
-                except:
-                    pass
-                
-            timer = threading.Timer(0.001, lambda: None)
-            timer.start()
-            timer.join()
-            fps.update()
-            f = f + 1
-            bar()
-        video.stop()
-        t.join()
-    fps.stop()
-    print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
-    print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
-    video.stop()
-
+    #@ray.remote
+    #def READ_FRAME():
+    #read_frame(video, totalFrames)
+    #rayscan.append(READ_FRAME.remote())
+    #ray.get(rayscan)
+    #time.sleep(5)
+    file_data, rgb_values, rgb_min_max = process_frames(videoFile, totalFrames, frameRate)
+    #rayscan.append(PROCESS_FRAME.remote())
+    #print(file_data)
+    #print(rgb_values)
+    #print(rgb_min_max)
     file_data['analysis'] = {'total frames':totalFrames, 'min_rgb':rgb_min_max[0],'max_rgb':rgb_min_max[1], 'median_rgb':statistics.median(rgb_values)}
-    
     tape_filename = videoFile.split(delimeter)[-1]
     tape_name_parts = tape_filename.split('.')
     #print('.'.join(tape_name_parts))
