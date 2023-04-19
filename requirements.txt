@@ -5,7 +5,6 @@ ffmpeg==1.4
 ffmpeg_python==0.2.0
 imutils==0.5.4
 internetarchive==3.2.0
-mastodon==0.0.1
 Mastodon.py==1.8.0
 numpy==1.23.1
 opencv_python==4.6.0.66
