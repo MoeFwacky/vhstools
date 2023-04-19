@@ -150,7 +150,7 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
     #print(totalFrames)
     
     video = FileVideoStream(videoFile).start()
-    frame_queue = queue.Queue()
+    frame_queue = queue.Queue(100)
     t = threading.Thread(target=read_frame, args=(video, frame_queue))
     t.start()
     time.sleep(5)
@@ -165,6 +165,7 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
         while f < int((totalFrames)):
             if not frame_queue.empty():
                 frame = frame_queue.get()
+                frame_queue.task_done()
                 try:
                     #print("avg_color_per_row = np.average(frame, axis=0)")
                     avg_color_per_row = np.average(frame, axis=0)
@@ -194,6 +195,7 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
                         time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient
                 except:
                     pass
+                
             timer = threading.Timer(0.001, lambda: None)
             timer.start()
             timer.join()
