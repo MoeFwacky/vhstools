@@ -152,8 +152,9 @@ def process_frames(videoFile, totalFrames, frameRate):
     f = 0
     with alive_bar(int((totalFrames)), force_tty=True) as bar:
         while f < int((totalFrames)):
-            frame = video.read()
             try:
+                frame = video.read()
+                #print(frame)
                 avg_color_per_row = np.average(frame, axis=0)
                 avg_color = np.average(avg_color_per_row, axis=0)
                 b,g,r = avg_color
@@ -176,7 +177,7 @@ def process_frames(videoFile, totalFrames, frameRate):
             bar()
         video.stop()
         fps.stop()
-        print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+        print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
         print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
         
         return file_data, rgb_values, rgb_min_max
