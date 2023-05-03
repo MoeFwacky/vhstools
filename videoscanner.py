@@ -1,6 +1,8 @@
+import configparser
 import datetime
 import ffmpeg
 import imutils
+import io
 import json
 import math
 import numpy as np
@@ -13,7 +15,10 @@ import time
 from alive_progress import alive_bar
 from imutils.video import FileVideoStream
 from imutils.video import FPS
+from pydub import AudioSegment, silence
+from pydub.utils import make_chunks
 
+silence_threshold = int(config['scenesplitter']['silence threshold'])
 frame_queue = queue.Queue(100)
 
 if os.name == 'nt':
@@ -145,11 +150,23 @@ def read_frame(video, totalFrames):
 def process_frames(videoFile, totalFrames, frameRate):
     fps = FPS().start()
     video = FileVideoStream(videoFile).start()
+    audio = AudioSegment.empty()
     file_data = {}
     file_data['frames'] = []
     rgb_values = []
     rgb_min_max = [255,0]
     f = 0
+    time_ms = 0
+
+    frame_duration = 1000/frameRate #ms
+    print("[ACTION] Extracting audio track from video file")
+    audio = AudioSegment.from_file(videoFile)
+    print("[ACTION] Splitting audio into",math.ceil(totalFrames),"chunks")
+    audio_chunks = make_chunks(audio, frame_duration)
+    fps.stop()
+    print("[INFO] elapsed time: {:.2f} seconds".format(fps.elapsed()))
+    #fps = FPS().start()
+    print("[ACTION] Processing Frames")
     with alive_bar(int((totalFrames)), force_tty=True) as bar:
         while f < int((totalFrames)):
             try:
@@ -164,7 +181,15 @@ def process_frames(videoFile, totalFrames, frameRate):
                 if rgb > rgb_min_max[1]:
                     rgb_min_max[1] = rgb
                 rgb_values.append(rgb)
-                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5)}     
+
+                loudness = audio_chunks[f].dBFS
+                silent = silence.detect_leading_silence(audio_chunks[f],silence_thresh=silence_threshold)
+                if silent == math.floor(frame_duration):
+                    is_silent = True
+                else:
+                    is_silent = False
+                
+                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5),'loudness':loudness, 'silence':is_silent}     
                 file_data['frames'].append(frameData)
                 if video.Q.qsize() < 5:  # If we are low on frames, give time to producer
                     time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient
@@ -173,12 +198,13 @@ def process_frames(videoFile, totalFrames, frameRate):
                 pass
                 
             fps.update()
-            f = f + 1
+            f += 1
+            time_ms += ((1/frameRate)*1000)
             bar()
         video.stop()
-        fps.stop()
-        print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
-        print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+        #fps.stop()
+        #print("[INFO] elapsed time: {:.2f} seconds".format(fps.elapsed()))
+        #print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
         
         return file_data, rgb_values, rgb_min_max
     
