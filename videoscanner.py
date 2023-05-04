@@ -18,6 +18,14 @@ from imutils.video import FPS
 from pydub import AudioSegment, silence
 from pydub.utils import make_chunks
 
+if os.name == 'nt':
+    delimeter = '\\'
+else:
+    delimeter = '/'
+
+scriptPath = os.path.realpath(os.path.dirname(__file__))
+config = configparser.ConfigParser()
+config.read(scriptPath + delimeter + 'config.ini')
 silence_threshold = int(config['scenesplitter']['silence threshold'])
 frame_queue = queue.Queue(100)
 
@@ -183,13 +191,13 @@ def process_frames(videoFile, totalFrames, frameRate):
                 rgb_values.append(rgb)
 
                 loudness = audio_chunks[f].dBFS
-                silent = silence.detect_leading_silence(audio_chunks[f],silence_thresh=silence_threshold)
+                '''silent = silence.detect_leading_silence(audio_chunks[f],silence_threshold=silence_threshold)
                 if silent == math.floor(frame_duration):
                     is_silent = True
                 else:
-                    is_silent = False
+                    is_silent = False'''
                 
-                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5),'loudness':loudness, 'silence':is_silent}     
+                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5),'loudness':loudness}     
                 file_data['frames'].append(frameData)
                 if video.Q.qsize() < 5:  # If we are low on frames, give time to producer
                     time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient

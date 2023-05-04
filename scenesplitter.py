@@ -20,6 +20,7 @@ config.read(scriptPath + delimeter + 'config.ini')
 
 divisor = int(config['scenesplitter']['median divisor'])
 minLength = int(config['scenesplitter']['clip minimum'])
+silence_threshold = int(config['scenesplitter']['silence threshold'])
     
 try:
 	if (sys.argv[1] == "--debug"):
@@ -89,10 +90,11 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
         number_of_frames = int(json_data['analysis']['total frames'])
         print(str(number_of_frames)+ " TOTAL FRAMES")
         frame = 0
-        print("RGB Threshold value:",json_data['analysis']['median_rgb']/divisor)
-        scene_rgb = scale_number(json_data['analysis']['median_rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])/divisor
-        print("RGB Threshold adjusted to",scene_rgb)
-        rgb = 256
+        rgb_threshold = json_data['analysis']['median_rgb']/divisor
+        print("RGB Threshold value:",rgb_threshold)
+        scene_rgb = rgb_threshold
+        #scene_rgb = scale_number(json_data['analysis']['median_rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])/divisor
+        #print("RGB Threshold adjusted to",scene_rgb)
         scene_list = []
         selected_frame_data = json_data['frames'][0]
         #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
@@ -109,26 +111,39 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                     except IndexError:
                         break
                     scene_number = scene_number + 1
-                while frame <= (start_frame_data['f'] + minimum_clip_frames):
-                    frame += 1
+                rgb = 256
+                while float(rgb) > scene_rgb and frame < totalFrames-1:
+                    while frame <= (start_frame_data['f'] + minimum_clip_frames):
+                        frame += 1
+                        try:
+                            last_frame_data = json_data['frames'][frame]
+                        except IndexError:
+                            break
+                        bar()
+                        rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                    '''frame += 1
+                    bar()
                     try:
                         last_frame_data = json_data['frames'][frame]
                     except IndexError:
                         break
-                    bar()
-                    rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                    rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])'''
                     #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                while float(rgb) > scene_rgb:
-                    frame += 1
-                    bar()
                     try:
-                        last_frame_data = json_data['frames'][frame]
+                        while not (rgb < rgb_threshold and json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] and json_data['frames'][frame]['loudness'] <= silence_threshold):
+                            frame += 1
+                            #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                            last_frame_data = json_data['frames'][frame]
+                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            bar()
                     except IndexError:
-                        break
-                    rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                    #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                    if frame < 2:
-                        while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']):
+                        print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                        last_frame_data = json_data['frames'][frame-1]
+                        rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        bar()
+                    '''if frame < 2:
+                        while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
                             frame += 1
                             bar()
                             #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
@@ -136,7 +151,7 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                             rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                        
                     elif frame > totalFrames-2:
                         try:
-                            while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb']):
+                            while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
                                 frame += 1
                                 bar()
                                 #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
@@ -147,7 +162,7 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                             rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                            
                     else:
                         try:
-                            while not (json_data['frames'][frame-2]['rgb'] > json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']):
+                            while not (json_data['frames'][frame-2]['rgb'] > json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
                                 frame += 1
                                 #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                                 last_frame_data = json_data['frames'][frame]
@@ -156,7 +171,7 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                         except IndexError:
                             #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                             last_frame_data = json_data['frames'][frame-1]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])'''
                     #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                 scene_data = {'scene':scene_number,'start_frame':start_frame_data['f'],'start_time':start_frame_data['ts'],'end_frame':last_frame_data['f'],'end_time':last_frame_data['ts']}
                 #print(scene_data)
@@ -189,7 +204,7 @@ def saveSplitScene(scene, file, path, startSplit, endSplit):
         (
             ffmpeg
             .input(file, ss=startSplit, to=endSplit)
-            .output(path+outputFileName, vcodec='libx264', loglevel="error", preset='fast', crf=11, acodec='aac')
+            .output(path+outputFileName, vcodec='copy', loglevel="error", acodec='copy')
             .run()
         )
     except ffmpeg.Error as e:
