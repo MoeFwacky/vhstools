@@ -139,9 +139,12 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                             bar()
                     except IndexError:
                         print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                        last_frame_data = json_data['frames'][frame-1]
-                        rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                        bar()
+                        try:
+                            last_frame_data = json_data['frames'][frame-1]
+                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            bar()
+                        except IndexError:
+                            break
                     '''if frame < 2:
                         while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
                             frame += 1
