@@ -5,6 +5,7 @@ import imutils
 import io
 import json
 import math
+import moviepy.editor as mp
 import numpy as np
 import os
 import queue
@@ -12,6 +13,7 @@ import ray
 import statistics
 import sys
 import time
+import wave
 from alive_progress import alive_bar
 from imutils.video import FileVideoStream
 from imutils.video import FPS
@@ -168,9 +170,21 @@ def process_frames(videoFile, totalFrames, frameRate):
 
     frame_duration = 1000/frameRate #ms
     print("[ACTION] Extracting audio track from video file")
-    audio = AudioSegment.from_file(videoFile)
+    #audio = AudioSegment.from_file(videoFile)
+    video_load = mp.VideoFileClip(videoFile)
+    audio_load = video_load.audio
+    audio_load.write_audiofile("temp.wav")
+    audio_wav = wave.open("temp.wav", mode='rb')
+    audio_chunks = None
     print("[ACTION] Splitting audio into",math.ceil(totalFrames),"chunks")
-    audio_chunks = make_chunks(audio, frame_duration)
+    while audio_wav.tell() < audio_wav.getnframes():
+        audio = AudioSegment(data=audio_wav.readframes(1000000),sample_width=audio_wav.getsampwidth(),frame_rate=audio_wav.getframerate(),channels=audio_wav.getnchannels())
+        if audio_chunks == None:
+            audio_chunks = make_chunks(audio, frame_duration)
+        else:
+            audio_chunks += make_chunks(audio, frame_duration)
+    audio_wav.close()
+    os.remove("temp.wav")
     fps.stop()
     print("[INFO] elapsed time: {:.2f} seconds".format(fps.elapsed()))
     #fps = FPS().start()
