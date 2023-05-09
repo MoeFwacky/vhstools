@@ -754,7 +754,11 @@ def checkMastodon():
             last_id = 0
             with open(temp_directory+delimeter+'toot_ID.txt', 'w') as newFile:
                 newFile.write('0')           
-        mentions = mastodon_client.notifications(since_id=last_id,types='mention')
+        try:
+            mentions = mastodon_client.notifications(since_id=last_id,types='mention')
+        except Exception as e:
+            print(e)
+            mentions = False
         if mentions == False:
             print("[MASTODON] No mentions found, checking again at",datetime.datetime.now()+datetime.timedelta(minutes=1))
             time.sleep(60)
