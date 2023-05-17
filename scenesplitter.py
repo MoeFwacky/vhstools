@@ -3,11 +3,13 @@ import datetime
 import ffmpeg
 import inspect 
 import json
+import numpy as np
 import os
 import sys
 import time
 import videoscanner
 from alive_progress import alive_bar
+from webcolors import CSS3_HEX_TO_NAMES, hex_to_rgb
 
 if os.name == 'nt':
     delimeter = '\\'
@@ -18,10 +20,19 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
 
-divisor = int(config['scenesplitter']['median divisor'])
+divisor = float(config['scenesplitter']['median divisor'])
 minLength = int(config['scenesplitter']['clip minimum'])
-silence_threshold = int(config['scenesplitter']['silence threshold'])
-    
+#silence_threshold = int(config['scenesplitter']['silence threshold'])
+split_colors = ['black','darkslategray']
+
+#getting rgb color name database
+css3_db = CSS3_HEX_TO_NAMES
+names = []
+rgb_values = []
+color_map = {}
+for color_hex, color_name in css3_db.items():
+    color_map[color_name] = color_hex
+
 try:
 	if (sys.argv[1] == "--debug"):
 		lineEnd = "\n"
@@ -29,6 +40,20 @@ try:
 		lineEnd = "\r"
 except:
 	lineEnd = "\r"
+
+def rgbFromStr(s):
+    r,g,b = int(s[1:3],16), int(s[3:5], 16),int(s[5:7], 16)
+    return r,g,b
+
+def nearestColorName(R,G,B,color_map=color_map):
+    mindiff = None
+    for d in color_map:
+        r,g,b = rgbFromStr(color_map[d])
+        diff = abs(R-r)*256+abs(G-g)*256+abs(B-b)*256
+        if mindiff is None or diff < mindiff:
+            mindiff = diff
+            mincolorname = d
+    return mincolorname
 
 def line(): #get line number
 	line = inspect.currentframe().f_back.f_lineno
@@ -91,7 +116,9 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
         print(str(number_of_frames)+ " TOTAL FRAMES")
         frame = 0
         rgb_threshold = json_data['analysis']['median_rgb']/divisor
-        print("RGB Threshold value:",rgb_threshold)
+        print("Brightness Threshold value:",rgb_threshold)
+        silence_threshold = json_data['analysis']['silence_threshold']
+        print("Silence Threshold value:",silence_threshold)
         scene_rgb = rgb_threshold
         #scene_rgb = scale_number(json_data['analysis']['median_rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])/divisor
         #print("RGB Threshold adjusted to",scene_rgb)
@@ -109,73 +136,66 @@ def getScenes(json_filename, totalFrames, frameRate=30, divisor=divisor, clip_mi
                     try:
                         start_frame_data = json_data['frames'][frame]
                     except IndexError:
+                        bar()
                         break
                     scene_number = scene_number + 1
                 rgb = 256
+                #colorMatch = False
                 while float(rgb) > scene_rgb and frame < totalFrames-1:
                     while frame <= (start_frame_data['f'] + minimum_clip_frames):
                         frame += 1
                         try:
                             last_frame_data = json_data['frames'][frame]
                         except IndexError:
+                            bar()
                             break
+                        
+                        #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        rgb = last_frame_data['rgb']
+                        if frame <=totalFrames-2:
+                            trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                            trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                            trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                            trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                        else:
+                            trailing_rgb_trend_up = True
+                        loudness = scale_number(float(last_frame_data['loudness']),-100,0,json_data['analysis']['min_loudness'],json_data['analysis']['max_loudness'])
                         bar()
-                        rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                        #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                    '''frame += 1
-                    bar()
+
                     try:
-                        last_frame_data = json_data['frames'][frame]
-                    except IndexError:
-                        break
-                    rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])'''
-                    #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                    try:
-                        while not (rgb < rgb_threshold and json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] and json_data['frames'][frame]['loudness'] <= silence_threshold):
+                        while not (rgb < rgb_threshold and trailing_rgb_trend_up is True and loudness <= silence_threshold):
                             frame += 1
                             #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                             last_frame_data = json_data['frames'][frame]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            rgb = last_frame_data['rgb']
+                            if frame <=totalFrames-3:
+                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                            else:
+                                trailing_rgb_trend_up = True
+                            loudness = scale_number(float(last_frame_data['loudness']),-100,0,json_data['analysis']['min_loudness'],json_data['analysis']['max_loudness'])
                             bar()
                     except IndexError:
-                        print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                        #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                         try:
                             last_frame_data = json_data['frames'][frame-1]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                            rgb = last_frame_data['rgb']
+                            if frame <=totalFrames-3:
+                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                            else:
+                                trailing_rgb_trend_up = True
+                            loudness = scale_number(float(last_frame_data['loudness']),-100,0,json_data['analysis']['min_loudness'],json_data['analysis']['max_loudness'])
                             bar()
                         except IndexError:
                             break
-                    '''if frame < 2:
-                        while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
-                            frame += 1
-                            bar()
-                            #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                            last_frame_data = json_data['frames'][frame]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                        
-                    elif frame > totalFrames-2:
-                        try:
-                            while not (json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
-                                frame += 1
-                                bar()
-                                #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                                last_frame_data = json_data['frames'][frame]
-                                rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                                            
-                        except IndexError:
-                            last_frame_data = json_data['frames'][frame-1]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])                            
-                    else:
-                        try:
-                            while not (json_data['frames'][frame-2]['rgb'] > json_data['frames'][frame-1]['rgb'] > json_data['frames'][frame]['rgb'] < json_data['frames'][frame+1]['rgb'] < json_data['frames'][frame+2]['rgb']) or json_data['frames'][frame]['loudness'] <= silence_threshold:
-                                frame += 1
-                                #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                                last_frame_data = json_data['frames'][frame]
-                                rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                                bar()
-                        except IndexError:
-                            #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                            last_frame_data = json_data['frames'][frame-1]
-                            rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])'''
-                    #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+
                 scene_data = {'scene':scene_number,'start_frame':start_frame_data['f'],'start_time':start_frame_data['ts'],'end_frame':last_frame_data['f'],'end_time':last_frame_data['ts']}
                 #print(scene_data)
                 scene_list.append(scene_data)
@@ -243,7 +263,7 @@ def processVideo(videoFile=None, path=os.getcwd()):
     scene_list = getScenes(STATS_FILE,totalFrames,frameRate)
     
     print("Exporting scene files to "+outputPath)
-    with alive_bar(int(totalFrames), force_tty=True) as bar2:
+    with alive_bar(int(len(scene_list)), force_tty=True) as bar2:
         for scene in scene_list:
             startFrame = scene['start_frame']
             endFrame = scene['end_frame']
@@ -253,7 +273,8 @@ def processVideo(videoFile=None, path=os.getcwd()):
             if not os.path.exists(outputPath):
                 os.makedirs(outputPath)
             saveSplitScene(scene['scene'], videoFile, outputPath, scene['start_frame']/frameRate, scene['end_frame']/frameRate)
-            for i in range(int(startFrame),int(endFrame)):
-                bar2()
-        for r in range(int(endFrame), int(totalFrames)):
+            '''for i in range(int(startFrame),int(endFrame)):
+                bar2()'''
             bar2()
+        '''for r in range(int(endFrame), int(totalFrames)):
+            bar2()'''

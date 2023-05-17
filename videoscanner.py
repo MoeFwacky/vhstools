@@ -12,9 +12,11 @@ import queue
 import ray
 import statistics
 import sys
+import tempfile
 import time
 import wave
 from alive_progress import alive_bar
+from decimal import Decimal
 from imutils.video import FileVideoStream
 from imutils.video import FPS
 from pydub import AudioSegment, silence
@@ -29,6 +31,8 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
 silence_threshold = int(config['scenesplitter']['silence threshold'])
+temp_directory = config['scenesplitter']['temp directory']
+audio_divisor = int(config['scenesplitter']['audio divisor'])
 frame_queue = queue.Queue(100)
 
 if os.name == 'nt':
@@ -157,7 +161,7 @@ def read_frame(video, totalFrames):
             f += 1
             bar()
 
-def process_frames(videoFile, totalFrames, frameRate):
+def process_frames(videoFile, totalFrames, frameRate, fileDuration):
     fps = FPS().start()
     video = FileVideoStream(videoFile).start()
     audio = AudioSegment.empty()
@@ -165,29 +169,54 @@ def process_frames(videoFile, totalFrames, frameRate):
     file_data['frames'] = []
     rgb_values = []
     rgb_min_max = [255,0]
+    loudness_values = []
+    loudness_min_max = [0,-99]
     f = 0
     time_ms = 0
 
     frame_duration = 1000/frameRate #ms
+    ms_duration = fileDuration * 1000
+
+    frame_length = len(range(0,math.ceil(totalFrames)))
+    step = int(frame_length/audio_divisor)
+    breaks = []
+    for r in range(0,math.ceil(totalFrames),step):
+        breaks.append(r)
+    
     print("[ACTION] Extracting audio track from video file")
-    #audio = AudioSegment.from_file(videoFile)
     video_load = mp.VideoFileClip(videoFile)
-    audio_load = video_load.audio
-    audio_load.write_audiofile("temp.wav")
-    audio_wav = wave.open("temp.wav", mode='rb')
-    audio_chunks = None
-    print("[ACTION] Splitting audio into",math.ceil(totalFrames),"chunks")
-    while audio_wav.tell() < audio_wav.getnframes():
-        audio = AudioSegment(data=audio_wav.readframes(1000000),sample_width=audio_wav.getsampwidth(),frame_rate=audio_wav.getframerate(),channels=audio_wav.getnchannels())
-        if audio_chunks == None:
+    a = 0
+    for b in breaks:
+        if a == 0:
+            clip_load = video_load.subclip(breaks[a]/frameRate,breaks[(a+1)]/frameRate)
+            audio_load = clip_load.audio
+            audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
+            audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
             audio_chunks = make_chunks(audio, frame_duration)
+            os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")
+        elif breaks[a] != breaks[-1]:
+            clip_load = video_load.subclip((breaks[a]+1)/frameRate,breaks[a+1]/frameRate)
+            audio_load = clip_load.audio
+            audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
+            audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
+            audio_chunks += make_chunks(audio, frame_duration)            
+            os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")
+        elif breaks[a] == breaks[-1] and breaks[a] < totalFrames:
+            try:
+                clip_load = video_load.subclip((breaks[a]+1)/frameRate,ms_duration/1000)
+                audio_load = clip_load.audio
+                audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
+                audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
+                audio_chunks += make_chunks(audio, frame_duration)
+                os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")            
+            except ValueError as e:
+                print(e)
+                pass
         else:
-            audio_chunks += make_chunks(audio, frame_duration)
-    audio_wav.close()
-    os.remove("temp.wav")
+            break
+        a+=1
     fps.stop()
-    print("[INFO] elapsed time: {:.2f} seconds".format(fps.elapsed()))
-    #fps = FPS().start()
+    print("[INFO] Audio Processing Time: {:.2f} seconds".format(fps.elapsed()))
     print("[ACTION] Processing Frames")
     with alive_bar(int((totalFrames)), force_tty=True) as bar:
         while f < int((totalFrames)):
@@ -198,18 +227,10 @@ def process_frames(videoFile, totalFrames, frameRate):
                 avg_color = np.average(avg_color_per_row, axis=0)
                 b,g,r = avg_color
                 rgb = (0.2126*r)+(0.7152*g)+(0.0722*b)
-                if rgb < rgb_min_max[0]:
-                    rgb_min_max[0] = rgb
-                if rgb > rgb_min_max[1]:
-                    rgb_min_max[1] = rgb
                 rgb_values.append(rgb)
 
                 loudness = audio_chunks[f].dBFS
-                '''silent = silence.detect_leading_silence(audio_chunks[f],silence_threshold=silence_threshold)
-                if silent == math.floor(frame_duration):
-                    is_silent = True
-                else:
-                    is_silent = False'''
+                loudness_values.append(loudness)
                 
                 frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5),'loudness':loudness}     
                 file_data['frames'].append(frameData)
@@ -224,11 +245,8 @@ def process_frames(videoFile, totalFrames, frameRate):
             time_ms += ((1/frameRate)*1000)
             bar()
         video.stop()
-        #fps.stop()
-        #print("[INFO] elapsed time: {:.2f} seconds".format(fps.elapsed()))
-        #print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
         
-        return file_data, rgb_values, rgb_min_max
+        return file_data, rgb_values, loudness_values
     
 def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
     os.chdir(path)
@@ -239,23 +257,18 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
     elif videoFile != None and totalFrames == None:
         frameRate, fileDuration, lengthFormatted = getFrameRateDuration(videoFile)
         #print(frameRate, fileDuration, lengthFormatted)
-        totalFrames = float(fileDuration*float(frameRate))
-    #print(totalFrames)
-    #rayscan = []
-    
-    
-    #@ray.remote
-    #def READ_FRAME():
-    #read_frame(video, totalFrames)
-    #rayscan.append(READ_FRAME.remote())
-    #ray.get(rayscan)
-    #time.sleep(5)
-    file_data, rgb_values, rgb_min_max = process_frames(videoFile, totalFrames, frameRate)
-    #rayscan.append(PROCESS_FRAME.remote())
-    #print(file_data)
-    #print(rgb_values)
-    #print(rgb_min_max)
-    file_data['analysis'] = {'total frames':totalFrames, 'min_rgb':rgb_min_max[0],'max_rgb':rgb_min_max[1], 'median_rgb':statistics.median(rgb_values)}
+        totalFrames = round(float(fileDuration*float(frameRate)))
+
+    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration)
+    file_data['analysis'] = {'total frames':totalFrames,
+        'min_rgb':min(rgb_values),
+        'max_rgb':max(rgb_values),
+        'median_rgb':statistics.median(rgb_values),
+        'min_loudness':min([i for i in loudness_values if i != Decimal('-Infinity')]),
+        'max_loudness':max(loudness_values),
+        'median_loudness':statistics.median(loudness_values),
+        'silence_threshold':np.percentile(loudness_values, 35)
+    }
     tape_filename = videoFile.split(delimeter)[-1]
     tape_name_parts = tape_filename.split('.')
     #print('.'.join(tape_name_parts))
