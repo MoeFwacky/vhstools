@@ -9,7 +9,7 @@ import sys
 import time
 import videoscanner
 from alive_progress import alive_bar
-from webcolors import CSS3_HEX_TO_NAMES, hex_to_rgb
+#from webcolors import CSS3_HEX_TO_NAMES, hex_to_rgb
 
 if os.name == 'nt':
     delimeter = '\\'
