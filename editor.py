@@ -164,18 +164,18 @@ def selectVideoFile(path, ext):
     print("CONFIRMED!")
     return dirDict[fileSelection]
 
-def splitVideo(entry,startSplit,endSplit,outputName):
+def splitVideo(entry,startSplit,endSplit,outputName,path):
     prevOutputName = ""
     clearline()
     textline(line(),entry)
-    filename = entry
+    filename = os.path.join(path,entry)
     #do the split
     clearline()
     textline(line(),"SPLITTING THIS FILE: "+filename)
     (
         ffmpeg
         .input(filename, ss=startSplit, to=endSplit)
-        .output(outputName, c='copy', loglevel="quiet")
+        .output(os.path.join(path,outputName), c='copy', loglevel="quiet")
         .run()
     )
     x = 1
@@ -212,46 +212,48 @@ def overlayImage(inFile,overlayFile,xAxis=30,yAxis=870,outputName="video-output"
         .run()
     )
 
-def mergeVideos(inFiles,outputName):
+def mergeVideos(inFiles,outputName, path):
     inFiles = inFiles.split(',')
     try:
-        f = open("merge.tmp","x",encoding='utf8')
+        f = open(os.path.join(path,"merge.tmp"),"x",encoding='utf8')
     except:
-        os.remove('merge.tmp')
-        f = open("merge.tmp","x",encoding='utf8')
+        os.remove(os.path.join(path,"merge.tmp"))
+        f = open(os.path.join(path,"merge.tmp"),"x",encoding='utf8')
     f.close()
     for file in inFiles:
         clearline()
         textline(line(),"PREPARING "+file+" FOR MERGE")
-        f = open("merge.tmp","a",encoding='utf8')
-        f.write("file \'"+file+"\'\n")
+        f = open(os.path.join(path,"merge.tmp"),"a",encoding='utf8')
+        f.write("file \'"+os.path.join(path,file)+"\'\n")
         f.close()
     textline(line(),"MERGING FILES")
     try:
         (
             ffmpeg
-            .input('merge.tmp', format='concat', safe=0)
-            .output(outputName, vcodec='libx264', loglevel="quiet", preset='fast', crf=11, acodec='aac')
+            .input(os.path.join(path,"merge.tmp"), format='concat', safe=0)
+            .output(os.path.join(path,outputName), vcodec='libx264', loglevel="quiet", preset='fast', crf=11, acodec='aac')
             .run()
         )
     except ffmpeg._run.Error as e:
-        clearline()
-        textline(line(),str(e))
-        clearline()
-        textline(line(),str(sys.stderr))
-    os.remove('merge.tmp')
+        if e.stderr is not None:
+            print(e.stderr.decode())
+        else:
+            print("Unknown error occurred during ffmpeg execution.")
+    
+    os.remove(os.path.join(path,"merge.tmp"))
     
 def processJSON(JSONfile=None, path=None):
     if path == None:
         path = selectDirectory(delimeter)
     if JSONfile == None:
         JSONfile = selectJSON(path)
-    j = open(JSONfile,)
+    j = open(os.path.join(path,JSONfile),)
     jsonData = json.load(j)
+    #print(jsonData)
     try:
         for d in jsonData['split']:
             #do the splits
-            splitVideo(d['input'],d['inTime'],d['outTime'],d['output'])  
+            splitVideo(d['input'],d['inTime'],d['outTime'],d['output'],path)  
     except:
         pass
     try:
@@ -259,7 +261,7 @@ def processJSON(JSONfile=None, path=None):
             #merge together
             print(d['input'])
             print(d['output'])
-            mergeVideos(d['input'],d['output'])
+            mergeVideos(d['input'],d['output'],path)
     except Exception as e:
         print(e)
         pass

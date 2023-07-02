@@ -14,6 +14,8 @@ import statistics
 import sys
 import tempfile
 import time
+import tkinter as tk
+import tqdm
 import wave
 from alive_progress import alive_bar
 from decimal import Decimal
@@ -39,6 +41,10 @@ if os.name == 'nt':
     delimeter = '\\'
 else:
     delimeter = '/'
+
+def start_processing():
+    # Call the process_frames function with update_progress as the progress_callback argument
+    process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_callback=update_progress)
 
 def convert(seconds): 
     try:
@@ -113,7 +119,7 @@ def selectVideo():
         path = path + delimeter
     dirContents = os.scandir(path)
     dirDict = {}
-    extensions = ['mp4','flv','avi']
+    extensions = ['mp4', 'm4v', 'flv', 'avi', 'mkv']
     k = 1
     for entry in dirContents:
         if entry.name[-3:] in extensions:
@@ -150,105 +156,164 @@ def selectVideo():
     print("CONFIRMED!")
     return dirDict[fileSelection], totalFrames, path
 
-def read_frame(video, totalFrames):
-    f = 0
-    with alive_bar(int((totalFrames)), force_tty=True) as bar:
-        while f <= totalFrames:
-            frame = video.read()
-            if frame is None:
-                break
-            frame_queue.put(frame)
-            f += 1
-            bar()
+def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list):
+    if progress_widget is not None and frames_processed % batch_size == 0:
+        time_elapsed, frames_per_second, time_remaining = progress_list
+        #print(frames_processed)
+        #print(progress_widget['maximum'])
+        percentage_complete = round((frames_processed/progress_widget['maximum'])*100)
+        #print(percentage_complete)
+        frames_per_second = "{:.2f}".format(frames_per_second)
+        
+        progress_label.config(text=str(percentage_complete)+'% '+str(frames_processed)+'/'+str(progress_widget['maximum'])+', '+str(time_elapsed)+'<'+time_remaining+', '+ str(frames_per_second+'f/s'))
+        progress_widget['value'] = frames_processed
+        progress_widget.update()
 
-def process_frames(videoFile, totalFrames, frameRate, fileDuration):
+def get_eta(start_time,f,total_frames):
+    seconds_elapsed = time.time() - start_time
+    elapsed_minutes, elapsed_seconds = divmod(seconds_elapsed, 60)
+    elapsed_hours, elapsed_minutes = divmod(elapsed_minutes, 60)
+    if elapsed_hours > 0:
+        time_elapsed = "{:02d}:{:02d}:{:02d}".format(round(elapsed_hours), round(elapsed_minutes), round(elapsed_seconds))
+    else:
+        time_elapsed = "{:02d}:{:02d}".format(round(elapsed_minutes), round(elapsed_seconds))    
+    
+    frames_per_second = f / seconds_elapsed
+    remaining_frames = total_frames - f
+    
+    if frames_per_second > 0:
+        remaining_time = remaining_frames / frames_per_second
+    else:
+        remaining_time = 0
+    
+    minutes, seconds = divmod(remaining_time, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    if hours > 0:
+        time_remaining = "{:02d}:{:02d}:{:02d}".format(round(hours), round(minutes), round(seconds))
+    else:
+        time_remaining = "{:02d}:{:02d}".format(round(minutes), round(seconds))
+
+    return time_elapsed, frames_per_second, time_remaining
+
+def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget):
     fps = FPS().start()
     video = FileVideoStream(videoFile).start()
     audio = AudioSegment.empty()
     file_data = {}
     file_data['frames'] = []
     rgb_values = []
-    rgb_min_max = [255,0]
+    rgb_min_max = [255, 0]
     loudness_values = []
-    loudness_min_max = [0,-99]
+    loudness_min_max = [0, -99]
     f = 0
     time_ms = 0
 
-    frame_duration = 1000/frameRate #ms
+    frame_duration = 1000 / frameRate  # ms
     ms_duration = fileDuration * 1000
-
-    frame_length = len(range(0,math.ceil(totalFrames)))
-    step = int(frame_length/audio_divisor)
-    breaks = []
-    for r in range(0,math.ceil(totalFrames),step):
-        breaks.append(r)
     
-    print("[ACTION] Extracting audio track from video file")
+    print("[INFO] Preparing for Audio Track Extraction")
+    frame_length = len(range(0, math.ceil(totalFrames)))
+    step = int(frame_length / audio_divisor)
+    breaks = []
+    for r in range(0, math.ceil(totalFrames), step):
+        breaks.append(r)
     video_load = mp.VideoFileClip(videoFile)
     a = 0
+    print("[INFO] Splitting audio track into "+str(len(breaks))+" files")
     for b in breaks:
         if a == 0:
-            clip_load = video_load.subclip(breaks[a]/frameRate,breaks[(a+1)]/frameRate)
+            clip_load = video_load.subclip(breaks[a] / frameRate, breaks[(a + 1)] / frameRate)
             audio_load = clip_load.audio
-            audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
-            audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
+            audio_load.write_audiofile(temp_directory + delimeter + "temp" + str(a) + ".wav", logger="bar")
+            audio = AudioSegment.from_file(temp_directory + delimeter + "temp" + str(a) + ".wav")
             audio_chunks = make_chunks(audio, frame_duration)
-            os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")
+            os.remove(temp_directory + delimeter + "temp" + str(a) + ".wav")
         elif breaks[a] != breaks[-1]:
-            clip_load = video_load.subclip((breaks[a]+1)/frameRate,breaks[a+1]/frameRate)
+            clip_load = video_load.subclip((breaks[a] + 1) / frameRate, breaks[a + 1] / frameRate)
             audio_load = clip_load.audio
-            audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
-            audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
-            audio_chunks += make_chunks(audio, frame_duration)            
-            os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")
+            audio_load.write_audiofile(temp_directory + delimeter + "temp" + str(a) + ".wav", logger="bar")
+            audio = AudioSegment.from_file(temp_directory + delimeter + "temp" + str(a) + ".wav")
+            audio_chunks += make_chunks(audio, frame_duration)
+            os.remove(temp_directory + delimeter + "temp" + str(a) + ".wav")
         elif breaks[a] == breaks[-1] and breaks[a] < totalFrames:
             try:
-                clip_load = video_load.subclip((breaks[a]+1)/frameRate,ms_duration/1000)
+                clip_load = video_load.subclip((breaks[a] + 1) / frameRate, ms_duration / 1000)
                 audio_load = clip_load.audio
-                audio_load.write_audiofile(temp_directory+delimeter+"temp"+str(a)+".wav",logger="bar")
-                audio = AudioSegment.from_file(temp_directory+delimeter+"temp"+str(a)+".wav")
+                audio_load.write_audiofile(temp_directory + delimeter + "temp" + str(a) + ".wav", logger="bar")
+                audio = AudioSegment.from_file(temp_directory + delimeter + "temp" + str(a) + ".wav")
                 audio_chunks += make_chunks(audio, frame_duration)
-                os.remove(temp_directory+delimeter+"temp"+str(a)+".wav")            
+                os.remove(temp_directory + delimeter + "temp" + str(a) + ".wav")
             except ValueError as e:
-                print(e)
+                if "should be smaller than the clip's duration" not in str(e):
+                    print("ERROR!",e)
                 pass
+            except OSError as e:
+                print(e)
         else:
             break
-        a+=1
+        time.sleep(0.5)
+        a += 1
     fps.stop()
     print("[INFO] Audio Processing Time: {:.2f} seconds".format(fps.elapsed()))
-    print("[ACTION] Processing Frames")
-    with alive_bar(int((totalFrames)), force_tty=True) as bar:
-        while f < int((totalFrames)):
+    print("[INFO] Preparing to Process Frames")
+
+    total_frames_with_progress = int(math.ceil(totalFrames))
+    frames_processed = 0
+    #print("[INFO] Resetting Progress Bar")
+    if progress_widget != None:
+        progress_widget['value'] = 0
+        progress_widget['maximum'] = total_frames_with_progress
+        
+    batch_size = 84  # Adjust the batch size as needed
+    start_time = time.time()
+    print("[ACTION] Scanning Frames for Brightness Data")
+    with alive_bar(total_frames_with_progress, force_tty=False) as bar:
+        for f in range(total_frames_with_progress):
             try:
                 frame = video.read()
-                #print(frame)
                 avg_color_per_row = np.average(frame, axis=0)
                 avg_color = np.average(avg_color_per_row, axis=0)
-                b,g,r = avg_color
-                rgb = (0.2126*r)+(0.7152*g)+(0.0722*b)
+                b, g, r = avg_color
+                rgb = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
                 rgb_values.append(rgb)
 
                 loudness = audio_chunks[f].dBFS
                 loudness_values.append(loudness)
-                
-                frameData = {'f':f, 'ts':str(datetime.timedelta(seconds=f/frameRate)),'rgb':round(rgb,5),'r':round(r,5),'g':round(g,5),'b':round(b,5),'loudness':loudness}     
+
+                frameData = {
+                    'f': f,
+                    'ts': str(datetime.timedelta(seconds=f / frameRate)),
+                    'rgb': round(rgb, 5),
+                    'r': round(r, 5),
+                    'g': round(g, 5),
+                    'b': round(b, 5),
+                    'loudness': loudness
+                }
                 file_data['frames'].append(frameData)
-                if video.Q.qsize() < 5:  # If we are low on frames, give time to producer
-                    time.sleep(0.001)  # Ensures producer runs now, so 2 is sufficient
+                if video.Q.qsize() < 5:
+                    time.sleep(0.001)
             except Exception as e:
-                print(e)
+                print("ERROR:", e)
                 pass
-                
-            fps.update()
-            f += 1
-            time_ms += ((1/frameRate)*1000)
+
+            frames_processed += 1
+            progress_list = get_eta(start_time,f,total_frames_with_progress)
+            progress(progress_widget,frames_processed,batch_size,progress_label,progress_list)
+            '''if progress_widget is not None and frames_processed % batch_size == 0:
+                progress_widget['value'] = frames_processed
+                progress_widget.update()'''
             bar()
+        progress_list = get_eta(start_time,f,total_frames_with_progress)
+        # Update progress and output widgets for the remaining frames
+        progress(progress_widget,frames_processed,batch_size,progress_label,progress_list)
         video.stop()
         
-        return file_data, rgb_values, loudness_values
+
+    return file_data, rgb_values, loudness_values
     
-def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
+def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None, progress_label=None, progress_widget=None):
+    print("PATH:",path)
     os.chdir(path)
     if path[-1] != delimeter:
         path = path + delimeter
@@ -259,7 +324,7 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
         #print(frameRate, fileDuration, lengthFormatted)
         totalFrames = round(float(fileDuration*float(frameRate)))
 
-    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration)
+    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget)
     file_data['analysis'] = {'total frames':totalFrames,
         'min_rgb':min(rgb_values),
         'max_rgb':max(rgb_values),
@@ -267,15 +332,20 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None):
         'min_loudness':min([i for i in loudness_values if i != Decimal('-Infinity')]),
         'max_loudness':max(loudness_values),
         'median_loudness':statistics.median(loudness_values),
-        'silence_threshold':np.percentile(loudness_values, 35)
+        'silence_threshold':np.percentile(loudness_values, 10)
     }
-    tape_filename = videoFile.split(delimeter)[-1]
+    try:
+        tape_directory = os.path.dirname(videoFile)
+    except:
+        tape_directory = path
+    tape_filename = os.path.basename(videoFile)
     tape_name_parts = tape_filename.split('.')
-    #print('.'.join(tape_name_parts))
-    tape_name = '.'.join(tape_name_parts[:-1])
+
+    tape_name = tape_name_parts[0]
     
     jsonFileName = tape_name+'.json'
-    STATS_FILE = path+jsonFileName
+    STATS_FILE = os.path.join(tape_directory,jsonFileName)
 
     with open(STATS_FILE, 'w+') as file:
         json.dump(file_data, file, indent = 1)
+    print("[ACTION] Video Scan Complete")

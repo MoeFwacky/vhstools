@@ -75,8 +75,10 @@ def selectDirectory(delimeter=delimeter):
     print("Selected Directory: "+path)
     return path
 
-def editMetadata(filename,outputPath,metadata):
-    outputFile = outputPath + delimeter + filename.split(delimeter)[-1]
+def editMetadata(filename,outputPath,metadata,outputFile=None):
+    if outputFile == None:
+        outputFile = outputPath + delimeter + filename.split(delimeter)[-1]
+    
     try:
         (
             ffmpeg
@@ -97,6 +99,36 @@ def editMetadata(filename,outputPath,metadata):
             )
             .run(capture_stdout=True, capture_stderr=True)
     )
+    except ffmpeg.Error as e:
+        print(e.stderr)
+
+def createMetadata(filename,outputPath,metadata,outputFile):
+    outputFile = os.path.join(outputPath,outputFile)
+    print(filename)
+    print(outputFile)
+    print('')
+
+    try:
+        print("Processing metadata with ffmpeg")
+        (
+            ffmpeg
+            .input(filename)
+            .output(
+                outputFile, 
+                c='copy', 
+                loglevel="verbose",
+                **{
+                    'metadata:g:0':"title="+metadata['Title'],
+                    'metadata:g:1':"date="+metadata['Air Date'],
+                    'metadata:g:2':"genre="+metadata['Tags'],
+                    'metadata:g:3':"network="+metadata['Network/Station'],
+                    'metadata:g:4':"synopsis="+metadata['Tape ID'],
+                    'metadata:g:5':"episode_id="+str(metadata['Frame Range'][0]),
+                    'metadata:g:6':"comment="+metadata['Location']+'\n'+metadata['Description'],
+                }
+            )
+            .run(capture_stdout=True, capture_stderr=True)
+        )
     except ffmpeg.Error as e:
         print(e.stderr)
     
@@ -125,4 +157,5 @@ def tagFiles(JSONFile=None, workingDirectory=None, directory=directory):
             print(d['Folder'])
             print(workingDirectory.split(delimeter)[-2])
             print("Directories do not match, skipping...")
+            
             
