@@ -1,6 +1,7 @@
 # videotools
 Developer: Moe Fwacky
 Version: 20230628
+
 VideoTools is released under the GNU General Public License (GPL).
     
 VideoTools is a multifunctional script designed for video analysis, editing, and social sharing. 
