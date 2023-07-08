@@ -1,6 +1,6 @@
 # videotools
 Developer: Moe Fwacky
-Version: 20230628
+Version: 20230708
 
 VideoTools is released under the GNU General Public License (GPL).
     
