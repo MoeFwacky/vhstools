@@ -1,9 +1,13 @@
 import argparse
+import configparser
 import datetime
 import io
+import json
 import os
+import random
 import ray
 import re
+import string
 import sys
 import threading
 import tkinter as tk
@@ -14,6 +18,11 @@ from tkinter import filedialog
 from tkinter import messagebox
 from tkinter import scrolledtext
 from tkinter import ttk
+
+scriptPath = os.path.realpath(os.path.dirname(__file__))
+config = configparser.ConfigParser()
+config.read(os.path.join(scriptPath,'config.ini'))
+json_file = config['analysis']['json file']
 
 # Create a custom TextRedirector class to redirect console output to the text box
 class TextRedirector(io.TextIOBase):
@@ -280,6 +289,14 @@ def launch_archiver(file=None,directory=None):
     else:
         iauploader.uploadToArchive(None)
 
+def launch_json_editor(file=None, tape_id=None, progress_label=None, progress_widget=None):
+    print("JSON Edit")
+    import jsongui
+    try:
+        jsongui.launch_gui(file)
+    except Exception as e:
+        print(e)
+
 def launch_editor(file=None,directory=None):
     import editor
     print("::::::                $$\ $$\   $$\                         :::::::")
@@ -436,6 +453,15 @@ def choose_directory():
     selected_file_label.config(text=directory)
     directory_var.set(directory)
 
+'''def on_json_file_selected(selected_file):
+    with open(selected_file) as file:
+        data = json.load(file)
+        tape_ids = list(set(entry["Tape_ID"] for entry in data))
+        tape_id_dropdown['menu'].delete(0, 'end')
+        for tape_id in tape_ids:
+            tape_id_dropdown['menu'].add_command(label=tape_id, command=tk._setit(selected_tape_id, tape_id))
+        tape_id_dropdown.config(state=tk.NORMAL)'''
+
 def select_file():
     selected_option = selected_script.get()
     filetypes = []
@@ -445,7 +471,7 @@ def select_file():
             ('Video Files', '*.mp4;*.avi;*.mkv;*.m4v'),
             ('All Files', '*.*')
         )
-    elif selected_option in ["Video Editor"]:
+    elif selected_option in ["Video Editor", "Data Editor"]:
         filetypes = (
             ('JSON Files', '*.json'),
             ('All Files', '*.*')
@@ -523,18 +549,20 @@ def launch_script(selected_script,output_text,progress_widget=None,action_label=
     for checkbox in checkboxes:
         if checkbox.get() == 1:
             selected_arguments.append(checkbox.cget('text'))
-
-    # Create a progress variable to store the progress value
-    progress_var = tk.IntVar()
-    # Create a label to display the progress status text
-    progress_label = tk.Label(window, text=" ")
-    progress_label.grid(row=4, column=9, columnspan=12, sticky=tk.W)
-    progress_widget = ttk.Progressbar(window, variable=progress_var, orient=tk.HORIZONTAL, length=500, mode='determinate')
-    progress_widget.grid(row=4, column=0, columnspan=18, sticky=tk.SW)
-    
+    if selected_script != "Data Editor":
+        # Create a progress variable to store the progress value
+        progress_var = tk.IntVar()
+        # Create a label to display the progress status text
+        progress_label = tk.Label(window, text=" ")
+        progress_label.grid(row=4, column=9, columnspan=12, sticky=tk.W)
+        progress_widget = ttk.Progressbar(window, variable=progress_var, orient=tk.HORIZONTAL, length=500, mode='determinate')
+        progress_widget.grid(row=4, column=0, columnspan=18, sticky=tk.SW)
+    else:
+        progress_label = None
     action_label.config(text="Starting "+selected_script)
     #print("Redirecting console output to the GUI text box...")
-    redirector = redirect_console_output(output_text,progress_widget=progress_widget,progress_label=progress_label,action_label=action_label)
+    redirector = redirect_console_output(output_text,progress_widget=progress_widget,
+    progress_label=progress_label,action_label=action_label)
 
     # Redirect the standard output to the text box
     #sys.stdout = TextRedirector(output_text)
@@ -687,7 +715,355 @@ elif args.identify != False:
     else:
         launch_tagger()
 else:
+    #run the gui
+    gui = None 
+    def create_new_entry():
+        global current_index, tape_data
+
+        # Get the information from the previous entry
+        previous_entry = tape_data[current_index]
+        tape_id = previous_entry["Tape_ID"]
+        #segment_end = datetime.datetime.strptime(previous_entry["Segment End"], "%H:%M:%S").time()
+        recording_date = previous_entry["Recording Date"]
+        order_on_tape = previous_entry["Order on Tape"]
+        location = previous_entry["Location"]
+
+        # Filter the data list to include entries with the same tape ID
+        tape_entries = [entry for entry in data if entry["Tape_ID"] == tape_id]
+
+        # Determine the highest order on tape value
+        max_order_on_tape = max(entry["Order on Tape"] for entry in tape_entries)
+
+        # Find the highest ID number in the entire file
+        max_id = max(entry.get("ID", 0) for entry in data)
+
+        # Find the last entry for the tape ID
+        last_entry = max(tape_entries, key=lambda entry: entry["Order on Tape"])
+
+        # Extract the end time from the last entry
+        segment_end = datetime.datetime.strptime(last_entry["Segment End"], "%H:%M:%S").time()
+
+        # Calculate the new segment start time
+        new_segment_string = (datetime.datetime.combine(datetime.date.today(), segment_end) + datetime.timedelta(seconds=1)).time().strftime("%H:%M:%S")
+        new_segment_split = new_segment_string.split(':')
+        new_segment_hours = new_segment_split[0][1:] if new_segment_split[0].startswith("0") else new_segment_split[0]
+        
+        new_segment_start = new_segment_hours+':'+new_segment_split[1]+':'+new_segment_split[2]
+        
+        # Create the new entry
+        new_entry = {
+            "ID": max_id + 1,
+            "Location": location,
+            "Network/Station": "",
+            "Order on Tape": max_order_on_tape + 1,
+            "Programs": "",
+            "Recording Date": recording_date,
+            "Segment End": new_segment_start,
+            "Segment Start": new_segment_start,
+            "Tape_ID": tape_id,
+        }
+
+        # Append the new entry to the data list
+        data.append(new_entry)
+
+        # Sort the data list based on tape ID and segment start time
+        data.sort(key=lambda entry: (entry["Tape_ID"], entry["Segment Start"]))
+
+        # Update the tape_data list
+        tape_data = get_ordered_data(tape_id)
+
+        # Find the index of the new entry in the tape_data list
+        current_index = tape_data.index(new_entry)
+
+        # Update the current index and show the new entry details
+        show_item_details(tape_data[current_index], tape_data, current_index)
+
+    def on_tape_id_selected(selected_tape_id):
+        global current_index, tape_data
+
+        if selected_tape_id:
+            tape_data = get_ordered_data(selected_tape_id)
+            if tape_data:
+                current_index = 0  # Reset the index to start from the first item
+                show_item_details(tape_data[current_index], tape_data, current_index)
+            else:
+                create_new_tape(selected_tape_id)  # Pass the custom value as the tape_id argument
+        else:
+            create_new_tape(selected_tape_id)  # Pass the custom value as the tape_id argument
+
+    def to_previous_segment():
+        global current_index, tape_data
+        if current_index > 0:
+            current_index -= 1  # Decrement the index to move to the previous item
+            show_item_details(tape_data[current_index], tape_data, current_index)
+
+    def to_next_segment():
+        global current_index, tape_data
+        if current_index < len(tape_data) - 1:
+            current_index += 1  # Increment the index to move to the next item
+            show_item_details(tape_data[current_index], tape_data, current_index)
+
+    def get_ordered_data(tape_id=None):
+        ordered_data = sorted(data, key=lambda item: (item.get("Tape_ID"), item.get("Segment Start")))
+        if tape_id is not None:
+            ordered_data = [item for item in ordered_data if item.get("Tape_ID") == tape_id]
+        return ordered_data
+            
+    def show_item_details(item, data, index):
+        global gui, entry_widget_mapping
+        launchloop = False
+        # Destroy the existing window if it exists
+        if gui is None:
+            gui = tk.Toplevel()
+            gui.title("Video JSON Keeper")
+            launchloop = True
+
+            # Bind the window close event to set `gui` to None
+            gui.protocol("WM_DELETE_WINDOW", lambda: on_window_close())
+
+        # Function to handle window close event
+        def on_window_close():
+            global gui
+            gui.destroy()
+            gui = None
+
+        if not gui:
+            return
+
+        if gui.winfo_exists():
+            for widget in gui.grid_slaves():
+                widget.destroy()
+        
+        # Clear existing widgets
+        for widget in gui.grid_slaves():
+            widget.grid_forget()
+
+        # Create labels and editable widgets for each key-value pair
+        keys = list(item.keys())
+        entry_widgets = []
+
+        # Create labels and editable widgets for each key-value pair
+        keys = list(item.keys())
+        entry_widgets = []
+        entry_widget_mapping = []
+
+        for i, key in enumerate(reversed(keys)):
+            label = tk.Label(gui, text=key)
+            label.grid(row=i, column=0, sticky="e")
+
+            value = tk.StringVar(value=item[key])
+            if key == "ID":
+                entry = tk.Entry(gui, textvariable=value, state="disabled")
+            else:
+                entry = tk.Entry(gui, textvariable=value, state="normal")
+            entry.grid(row=i, column=1, padx=10, pady=5, sticky="w")
+            entry_widgets.append(entry)
+            entry_widget_mapping.append((entry, key))  # Store the mapping between entry widget and key
+
+        # Create buttons to navigate back and forth
+        start_button = tk.Button(gui, text="Previous Segment", command=to_previous_segment)
+        start_button.grid(row=len(keys), column=0, padx=10, pady=10, sticky="w")
+
+        end_button = tk.Button(gui, text="Next Segment", command=to_next_segment)
+        end_button.grid(row=len(keys), column=1, padx=10, pady=10, sticky="e")
+
+        new_entry_button = tk.Button(gui, text="New Entry", command=create_new_entry)
+        new_entry_button.grid(row=len(keys) + 1, column=0, pady=10, sticky="w")
+
+        new_tape_button = tk.Button(gui, text="New Tape", command=create_new_tape)
+        new_tape_button.grid(row=len(keys) + 1, column=1, pady=10, sticky="e")
+
+        # Create a video playback widget and frame tracking widget
+        '''video_widget = tk.Label(gui, text="Video Playback Widget")
+        video_widget.grid(row=len(keys) + 2, columnspan=2, padx=10, pady=10)
+
+        frame_widget = tk.Label(gui, text="Frame Tracking Widget")
+        frame_widget.grid(row=len(keys) + 3, columnspan=2, padx=10, pady=10)'''
+
+        save_button = tk.Button(gui, text="Save Changes to File", command=save_to_json)
+        save_button.grid(row=len(keys) + 4, column=0, columnspan=2, padx=30, pady=10, sticky="nsew")
+
+        # Update the entry widgets with current item values
+        for i, key in enumerate(reversed(keys)):
+            entry = entry_widgets[i]
+            entry.delete(0, tk.END)
+            entry.insert(tk.END, item[key])
+
+        # Update the current index
+        global current_index
+        current_index = index
+
+        # Run the Tkinter event loop for the window
+        if launchloop:
+            gui.mainloop()
+
+    def create_new_tape(tape_id=None):
+        global current_index, tape_data
+        random_string = "".join(random.choice(string.ascii_letters) for _ in range(3))
+        if tape_id == None or tape_id == "":
+            tape_id = random_string.upper() + "-001"  # Blank Tape ID
+        segment_start = "0:00:00"  # Initial segment start value
+        order_on_tape = 1  # Initial order on tape value
+
+        # Check if the tape ID already exists
+        tape_ids = [entry["Tape_ID"] for entry in data]
+        while tape_id in tape_ids:
+            # Extract the prefix and highest number from existing tape IDs
+            prefix = tape_id[:-4]  # Remove the last four characters ("-001")
+            existing_numbers = [int(tid[-3:]) for tid in tape_ids if tid.startswith(prefix)]
+            highest_number = max(existing_numbers) if existing_numbers else 0
+
+            # Generate the new tape ID with the next number
+            next_number = highest_number + 1
+            tape_id = f"{prefix}-{next_number:03d}"
+
+        # Find the highest ID number in the entire file
+        max_id = max(entry.get("ID", 0) for entry in data)
+
+        # Create the new tape entry
+        new_entry = {
+            "ID": max_id + 1,
+            "Location": "",
+            "Network/Station": "",
+            "Order on Tape": order_on_tape,
+            "Programs": "",
+            "Recording Date": "",
+            "Segment End": segment_start,
+            "Segment Start": segment_start,
+            "Tape_ID": tape_id
+        }
+
+        # Append the new entry to the data list
+        data.append(new_entry)
+
+        # Sort the data list based on tape ID and segment start time
+        data.sort(key=lambda entry: (entry["Tape_ID"], entry["Segment Start"]))
+
+        # Update the tape_data list
+        tape_data = get_ordered_data(tape_id)
+
+        # Find the index of the new entry in the tape_data list
+        current_index = tape_data.index(new_entry)
+
+        # Update the current index and show the new entry details
+        show_item_details(tape_data[current_index], tape_data, current_index)
+        
+    def save_to_json():
+        global tape_data, current_index, data
+
+        # Update the data list with the modified values from the entry fields
+        new_entry = {}
+        for widget, key in reversed(entry_widget_mapping):
+            entry_value = widget.get().strip()
+            if key in ["ID", "Order on Tape"]:
+                try:
+                    entry_value = int(entry_value)  # Convert to integer if it's ID or Order on Tape
+                except ValueError:
+                    messagebox.showerror("Validation Error", f"Order on Tape value must be an integer: {entry_value}")
+                    return
+            new_entry[key] = entry_value
+
+        validation_errors = validate_data(new_entry)
+
+        if validation_errors:
+            # Display validation errors and prevent saving
+            messagebox.showerror("Validation Error", "\n".join(validation_errors))
+            return
+
+        # Check if a matching ID number already exists
+        matching_entry = next((entry for entry in data if entry["ID"] == new_entry["ID"]), None)
+        if matching_entry:
+            # Update the existing entry
+            matching_entry.update(new_entry)
+        else:
+            # Append the new entry to the data list
+            data.append(new_entry)
+
+        # Save the modified data to the JSON file
+        with open(json_file, "w") as json_data:
+            json.dump(data, json_data, indent=4)
+
+        # Reload the tape_data from the file
+        tape_data = [new_entry]
+
+        # Find the index of the current entry in the tape_data list
+        current_index = tape_data.index(new_entry)
+
+        # Update the current index and show the new entry details
+        show_item_details(tape_data[current_index], tape_data, current_index)
+
+        messagebox.showinfo("Save Successful", "Data saved successfully.")
+
+    def validate_data(entry_data):
+        validation_errors = []
+        tape_id = entry_data["Tape_ID"]
+        segment_start = entry_data["Segment Start"]
+        segment_end = entry_data["Segment End"]
+        order_on_tape = str(entry_data["Order on Tape"])
+
+        # Check for overlaps in segment start and end times
+        for entry in data:
+            if entry["Tape_ID"] == tape_id and entry != entry_data:
+                if entry["Segment End"] > segment_start and entry["Segment Start"] < segment_end:
+                    validation_errors.append("Overlap in segment times with Tape ID: {}".format(tape_id))
+                    break
+
+        # Validate time format (H:MM:SS)
+        time_pattern = r"^(?:[0-9]|0[0-9]|1[0-9]|2[0-3]):(?:[0-9]|[0-5][0-9]):(?:[0-9]|[0-5][0-9])$"
+        if not re.match(time_pattern, segment_start):
+            validation_errors.append("Invalid time format for Segment Start: {}".format(segment_start))
+        if not re.match(time_pattern, segment_end):
+            validation_errors.append("Invalid time format for Segment End: {}".format(segment_end))
+
+        # Validate date format (YYYY-MM-DD)
+        date_pattern = r"^\d{4}-\d{2}-\d{2}$"
+        if not re.match(date_pattern, entry_data["Recording Date"]):
+            validation_errors.append("Invalid date format for Recording Date: {}".format(entry_data["Recording Date"]))
+
+        # Validate Order on Tape as integer
+        try:
+            int(order_on_tape)
+        except:
+            validation_errors.append("Order on Tape must be an integer: {}".format(order_on_tape))
+ 
+        # Check for duplicates in order on tape
+        for entry in data:
+            if entry["Tape_ID"] == tape_id and entry["ID"] != entry_data["ID"]:
+                if str(entry["Order on Tape"]) == order_on_tape:
+                    print(entry)
+                    print(entry_data)
+                    validation_errors.append("Duplicate Order on Tape value with Tape ID: {}".format(tape_id))
+                    break
+                
+
+        return validation_errors
+
+
+    def display_validation_errors(validation_errors):
+        # Clear existing error labels
+        for widget in gui.grid_slaves():
+            if isinstance(widget, tk.Label) and widget.cget("foreground") == "red":
+                widget.destroy()
+
+        # Display validation errors in the GUI
+        error_row = len(data) + 5
+        for error in validation_errors:
+            error_label = tk.Label(gui, text=error, foreground="red")
+            error_label.grid(row=error_row, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+            error_row += 1
+
+
+    def on_selection_changed():
+        selection = selection_var.get()
+        if selection == "file":
+            filename_button.grid(row=0, column=4, columnspan=4, sticky=tk.SW, pady=1)
+            directory_button.grid_forget()
+        elif selection == "directory":
+            directory_button.grid(row=0, column=4, columnspan=4, sticky=tk.SW, pady=1)
+            filename_button.grid_forget()
+
     print("Launching GUI")
+    
     window = tk.Tk()
     window.title("Video Tools")
     window.geometry("1200x450")
@@ -723,7 +1099,7 @@ else:
     # Creating a variable to store the selected option
     selected_script = tk.StringVar()
     selected_script.trace('w', update_button_state)  # Call update_button_state when the selected_script changes
-
+    
     # Create a label widget
     #label = tk.Label(window, text="Select Operation:")
     #label.grid(row=0, column=0, columnspan=2 sticky=tk.E)
@@ -738,16 +1114,9 @@ else:
     filename_button = tk.Button(window, text="Browse", command=select_file)
     filename_button.grid(row=0, column=5, columnspan=4, sticky=tk.SW, pady=1)
     filename_button.config(state=tk.DISABLED)
+
     
-    def on_selection_changed():
-        selection = selection_var.get()
-        if selection == "file":
-            filename_button.grid(row=0, column=4, columnspan=4, sticky=tk.SW, pady=1)
-            directory_button.grid_forget()
-        elif selection == "directory":
-            directory_button.grid(row=0, column=4, columnspan=4, sticky=tk.SW, pady=1)
-            filename_button.grid_forget()
-    
+    #selected_script.trace('w', on_selection_changed)
     radio_file = tk.Radiobutton(window, text="File", variable=selection_var, value="file", command=on_selection_changed)
     radio_file.grid(row=0, column=2, columnspan=2, sticky=tk.S, padx=5, pady=5)
 
@@ -758,7 +1127,7 @@ else:
     directory_button = tk.Button(window, text="Browse", command=choose_directory)
     directory_button.config(state=tk.DISABLED)
 
-    selected_script.trace("w", lambda *args: update_arguments(*args, selected_script=selected_script))
+    #selected_script.trace("w", lambda *args: update_arguments(*args, selected_script=selected_script))
 
     selected_file_label = tk.Label(window)
     selected_file_label.grid(row=0, column=8, columnspan=6, sticky=tk.W)
@@ -769,15 +1138,44 @@ else:
     stop_button = tk.Button(window, text="ABORT!", command=stop_execution)
     stop_button.grid(row=2, column=18, columnspan=2, padx=10, sticky=tk.N)  
 
-    launch_button = tk.Button(window, text="Execute Operation", command=lambda: launch_script(selected_script.get(),output_text, action_label=action_label))
+    launch_button = tk.Button(window, text="Start", command=lambda: launch_script(selected_script.get(),output_text, action_label=action_label))
     launch_button.grid(row=0, column=18, columnspan=2, padx=10, sticky=tk.NSEW)
     launch_button.config(state=tk.DISABLED)
 
+    json_file_label = tk.Label(window, text=json_file)
+    json_file_label.grid(row=1, column=10, columnspan=3)
+    
+    # Create a label for the Tape ID dropdown
+    tape_id_label = tk.Label(window, text="Tape ID:")
+    tape_id_label.grid(row=1, column=13, sticky="e")
+    #tape_id_label.config(state=tk.DISABLED)
+
+    # Load the JSON data from the file
+    with open(json_file, "r") as json_data:
+        data = json.load(json_data)
+
+    tape_ids = list(set(entry["Tape_ID"] for entry in data))
+    tape_ids = sorted(tape_ids, key=lambda x: int(''.join(filter(str.isdigit, x))))
+    
+    current_index = 0
+
+    # Create an editable dropdown for Tape ID selection
+    selected_tape_id = tk.StringVar()
+    tape_id_dropdown = ttk.Combobox(window, textvariable=selected_tape_id, state="normal")
+    tape_id_dropdown["values"] = tape_ids
+    tape_id_dropdown.grid(row=1, column=14, columnspan=3, sticky="w")
+    #tape_id_dropdown.config(state=tk.DISABLED)
+
+    # Create a button to launch the JSON editor
+    launch_editor_button = tk.Button(window, text="Data Editor", command=lambda: on_tape_id_selected(selected_tape_id.get()))
+    launch_editor_button.grid(row=1, column=18, columnspan=2, sticky=tk.NSEW)
+    #launch_editor_button.config(state=tk.DISABLED)
+    
     # Create a text box to display the output
     output_text = scrolledtext.ScrolledText(window, background="black", foreground="lime", height=15)
-    output_text.grid(row=5, column=0, columnspan=20, rowspan=10, sticky=tk.NSEW)
+    output_text.grid(row=6, column=0, columnspan=20, rowspan=10, sticky=tk.NSEW)
     window.grid_propagate(0)
-    
+
     def on_window_close():
         stop_execution()
         window.destroy()
