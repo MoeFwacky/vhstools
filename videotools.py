@@ -50,19 +50,20 @@ class TextRedirector(io.TextIOBase):
             s = s.rstrip("\n")
 
         # Update the progress bar if it exists and skip output starting with 'chunk:'
-        if s.lstrip().startswith("chunk:"):
+        if s.lstrip().startswith("chunk:") or s.lstrip().startswith("t:"):
             self.progress_widget['maximum'] = 100
             self.update_progress_mp(s)
             return
         elif s.lstrip().startswith("MoviePy") or s.lstrip().startswith("[ACTION]"):
-            self.action_label.config(text=s.strip().replace("MoviePy - ","").replace("[ACTION] ",""))
             if "MoviePy" and "Done" in s.lstrip():
                 self.progress_widget['value'] = self.progress_widget['maximum']
                 self.progress_widget.update()
+                return
+            self.action_label.config(text=s.strip().replace("MoviePy - ","").replace("[ACTION] ",""))
             return
         # Write to the console
         #sys.__stdout__.write(s)
-        if len(s.strip()) == 0 or s.strip() == "\n":
+        if len(s.strip()) == 0 or s.strip() == "\n" or "Done." in s.strip():
             return
         # Remove the last newline character if it exists
         if self.text_widget.get("end-1c", "end") == "\n":
@@ -89,7 +90,10 @@ class TextRedirector(io.TextIOBase):
 
     def update_progress_mp(self, output):
         # Extract the progress information from the output
-        parts = output.split("chunk:")
+        if "chunk:" in output:
+            parts = output.split("chunk:")
+        elif "t:" in output:
+            parts = output.split("t:")
         progress_info = parts[1].strip()
         progress = progress_info.split('%')[0]
         progress_data = progress + '% ' + parts[1].split('|')[2]
@@ -101,6 +105,7 @@ class TextRedirector(io.TextIOBase):
 
     def flush(self):
         pass  # No need to flush in this case
+        
 print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
 print("::o     o  o      8                 ooooo               8        ::")
@@ -123,6 +128,7 @@ parser.add_argument('-m', '--mastodon', action='store_true', help="Automatically
 parser.add_argument('-ds', '--discord', action='store_true', help="Automatically post video clips to Discord")
 parser.add_argument('-sc', '--scanner', action='store_true', help="Scan video file(s) and generate json data file(s)")
 parser.add_argument('-sp', '--splitter', action='store_true', help="Detect dip-to-black in video file(s) and save clips to folder")
+parser.add_argument('-au', '--audio', action='store_true', help="Normalize audio levels")
 parser.add_argument('-id', '--identify', action='store_true', help="Use AI tools to analyze and identify video clips")
 parser.add_argument('-e', '--editor', action='store_true', help="Process video edits as defined in a JSON file")
 parser.add_argument('-t', '--tagger', action='store_true', help="Add metadata to videos by parsing JSON data")
@@ -186,7 +192,9 @@ def launch_scanner(file=None,directory=None,progress_label=None,progress_widget=
     time_minutes = elapsed_time.total_seconds() // 60
     time_seconds = elapsed_time.total_seconds() % 60
     if action_label != None:
-        action_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+        progress_widget['value'] = progress_widget['maximum']
+        action_label.config(text="")
+        progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
     else: 
         print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
 def launch_splitter(file=None,directory=None,progress_label=None,progress_widget=None):
@@ -215,7 +223,81 @@ def launch_splitter(file=None,directory=None,progress_label=None,progress_widget
     time_minutes = elapsed_time.total_seconds() // 60
     time_seconds = elapsed_time.total_seconds() % 60
     if action_label != None:
-        action_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+        progress_widget['value'] = progress_widget['maximum']
+        action_label.config(text="")
+        progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+    else: 
+        print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+def launch_audio_normalizer(file=None,directory=None,progress_label=None,progress_widget=None):
+    print("::: ___  __ __ _____ __  _____                                  :::")
+    print(":::||=|| || || ||  ) || ((   ))                                 :::")
+    print(":::|| ||_\\_//_||_//_|| _\\_//_  ___  __    __ ____  _____ _____:::")
+    print(":::||\\|| ((   )) ||_// || \/ | ||=|| ||    ||   //  ||==  ||_//:::")
+    print(":::|| \||  \\_//  || \\ ||    | || || ||__| ||  //__ ||___ || \\:::")
+    print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+    starting_time = datetime.datetime.now()
+    import normalizer
+    if file != None:
+        normalizer.normalize_audio(file)
+    elif directory != None:
+        dirContents = os.scandir(directory)
+        dirList = []
+        extensions = ['mp4','avi','m4v','mkv']
+        for entry in dirContents:
+            if entry.name[-3:] in extensions:
+                print("NORMALIZING "+str(entry.name)+" in "+str(directory))
+                normalizer.normalize_audio(os.path.join(directory, entry.name))
+    else:
+        print("Press Enter to use "+workingDir)
+        path = input(">:")
+        if path == "":
+            path = workingDir
+        dirContents = os.scandir(path)
+        dirDict = {}
+        extensions = ['mp4', 'm4v', 'avi', 'mkv']
+        k = 1
+        for entry in dirContents:
+            if entry.name[-3:] in extensions:
+                dirDict[k] = entry.name
+                lengthFormatted = formatDuration(entry.name)
+                print(str(k)+": "+entry.name+" ------ "+lengthFormatted)
+                k = k + 1
+        fileSelection = selectFile(k)
+        print("\nFILE SELECTED")
+        print(dirDict[fileSelection])
+        frameRate, fileDuration, lengthFormatted = getFrameRateDuration(dirDict[fileSelection])
+        print("DURATION = ",lengthFormatted)
+        print("FRAME RATE = "+str(round(frameRate,2))+" FPS")
+        totalFrames = fileDuration*float(frameRate)
+        print('TOTAL FRAMES: ',totalFrames)
+        cont = input("\nContinue with this file? (Y/N) >:")
+        yn = ['y','Y','Yes','YES','yes','N','n','No','NO','no']
+        yes = ['y','Y','Yes','YES','yes']
+        no = ['N','n','No','NO','no']
+        while cont not in yn:
+            print("INVALID ENTRY")
+            cont = input("Continue with this file? (Y/N) >:")
+        while cont in no:
+            print("Enter a Number Between 1 and "+str(k-1)+":")
+            fileSelection = selectFile(k)
+            print("FILE SELECTED")
+            print(dirDict[fileSelection])
+            frameRate, fileDuration, lengthFormatted = getFrameRateDuration(dirDict[fileSelection])
+            print("DURATION = ",lengthFormatted)
+            print("FRAME RATE = "+str(round(frameRate,2))+" FPS")
+            totalFrames = float(fileDuration*float(frameRate))
+            print('TOTAL FRAMES: ',totalFrames)
+            cont = input("\nContinue with this file? (Y/N) >:")
+        print("CONFIRMED!")
+        normalizer.normalize_audio(os.path.join(path,dirDict[fileSelection]))
+    ending_time = datetime.datetime.now()
+    elapsed_time = ending_time - starting_time
+    time_minutes = elapsed_time.total_seconds() // 60
+    time_seconds = elapsed_time.total_seconds() % 60
+    if action_label != None:
+        progress_widget['value'] = progress_widget['maximum']
+        action_label.config(text="")
+        progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
     else: 
         print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
 def launch_identifier(file=None,directory=None,progress_label=None,progress_widget=None,action_label=None):
@@ -256,7 +338,9 @@ def launch_identifier(file=None,directory=None,progress_label=None,progress_widg
     time_minutes = elapsed_time.total_seconds() // 60
     time_seconds = elapsed_time.total_seconds() % 60
     if action_label != None:
-        action_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+        progress_widget['value'] = progress_widget['maximum']
+        action_label.config(text="")
+        progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
     else: 
         print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
 def launch_archiver(file=None,directory=None):
@@ -466,7 +550,7 @@ def select_file():
     selected_option = selected_script.get()
     filetypes = []
     
-    if selected_option in ["Scanner", "Splitter", "Identifier", "Metatagger", "Archiver", "Vid2Social", "SocialBot"]:
+    if selected_option in ["Scanner", "Splitter", "Audio Normalizer", "Identifier", "Metatagger", "Archiver", "Vid2Social", "SocialBot"]:
         filetypes = (
             ('Video Files', '*.mp4;*.avi;*.mkv;*.m4v'),
             ('All Files', '*.*')
@@ -480,7 +564,7 @@ def select_file():
         filename_button.config(state=tk.DISABLED)
         launch_button.config(state=tk.DISABLED)
     filepath = filedialog.askopenfilename(filetypes=filetypes)
-    selected_file_label.config(text=filepath)
+    selected_file_label.config(text=os.path.basename(filepath))
     filename_var.set(filepath)
 
 def stop_execution():
@@ -588,6 +672,12 @@ def launch_script(selected_script,output_text,progress_widget=None,action_label=
             thread.start()
         except Exception as e:
             print(e)
+    elif selected_script == "Audio Normalizer":
+        try:
+            thread = threading.Thread(target=launch_audio_normalizer,args=(selected_filename,selected_directory,progress_label,progress_widget))
+            thread.start()
+        except Exception as e:
+            print(e)
     elif selected_script == "Video Editor":
         try:
             thread = threading.Thread(target=launch_editor,args=(selected_filename,selected_directory))
@@ -637,6 +727,16 @@ if args.scanner != False:
         launch_scanner(directory=args.directory)
     else:
         launch_scanner()
+
+if args.audio != False:
+    if args.filename != None:
+        launch_audio_normalizer(file=args.filename)
+    elif args.filepath != None:
+        launch_audio_normalizer(file=args.filepath)
+    elif args.directory != None:
+        launch_audio_normalizer(directory=args.directory)
+    else:
+        launch_audio_normalizer()
 
 elif args.archive != False:
     if args.filename != None:
@@ -816,6 +916,7 @@ else:
         if gui is None:
             gui = tk.Toplevel()
             gui.title("Video JSON Keeper")
+            gui.iconbitmap("tv.ico")
             launchloop = True
 
             # Bind the window close event to set `gui` to None
@@ -861,17 +962,17 @@ else:
             entry_widget_mapping.append((entry, key))  # Store the mapping between entry widget and key
 
         # Create buttons to navigate back and forth
-        start_button = tk.Button(gui, text="Previous Segment", command=to_previous_segment)
-        start_button.grid(row=len(keys), column=0, padx=10, pady=10, sticky="w")
+        prev_button = tk.Button(gui, text="Previous Segment", command=to_previous_segment)
+        prev_button.grid(row=len(keys), column=0, padx=10, pady=10, sticky="nsew")
 
-        end_button = tk.Button(gui, text="Next Segment", command=to_next_segment)
-        end_button.grid(row=len(keys), column=1, padx=10, pady=10, sticky="e")
+        next_button = tk.Button(gui, text="Next Segment", command=to_next_segment)
+        next_button.grid(row=len(keys), column=1, padx=10, pady=10, sticky="nsew")
 
         new_entry_button = tk.Button(gui, text="New Entry", command=create_new_entry)
-        new_entry_button.grid(row=len(keys) + 1, column=0, pady=10, sticky="w")
+        new_entry_button.grid(row=len(keys) + 1, column=0, padx=10, pady=10, sticky="nsew")
 
         new_tape_button = tk.Button(gui, text="New Tape", command=create_new_tape)
-        new_tape_button.grid(row=len(keys) + 1, column=1, pady=10, sticky="e")
+        new_tape_button.grid(row=len(keys) + 1, column=1, padx=10, pady=10, sticky="nsew")
 
         # Create a video playback widget and frame tracking widget
         '''video_widget = tk.Label(gui, text="Video Playback Widget")
@@ -1066,7 +1167,7 @@ else:
     
     window = tk.Tk()
     window.title("Video Tools")
-    window.geometry("1200x450")
+    window.geometry("1300x450")
     menu_bar = tk.Menu(window)
     help_menu = tk.Menu(menu_bar, tearoff=0)
     menu_bar.add_cascade(label="Help", menu=help_menu)
@@ -1088,6 +1189,7 @@ else:
         "SELECT OPERATION": [],
         "Scanner": [],
         "Splitter": [],
+        "Audio Normalizer": [],
         "Identifier": [],
         "Archiver": [],
         "Video Editor": [],
@@ -1130,10 +1232,10 @@ else:
     #selected_script.trace("w", lambda *args: update_arguments(*args, selected_script=selected_script))
 
     selected_file_label = tk.Label(window)
-    selected_file_label.grid(row=0, column=8, columnspan=6, sticky=tk.W)
+    selected_file_label.grid(row=0, column=8, columnspan=8, sticky=tk.W)
 
     action_label = tk.Label(window, text="")
-    action_label.grid(row=3, column=0, columnspan=8)
+    action_label.grid(row=3, column=0, columnspan=20)
 
     stop_button = tk.Button(window, text="ABORT!", command=stop_execution)
     stop_button.grid(row=2, column=18, columnspan=2, padx=10, sticky=tk.N)  
@@ -1167,7 +1269,7 @@ else:
     #tape_id_dropdown.config(state=tk.DISABLED)
 
     # Create a button to launch the JSON editor
-    launch_editor_button = tk.Button(window, text="Data Editor", command=lambda: on_tape_id_selected(selected_tape_id.get()))
+    launch_editor_button = tk.Button(window, text="Tape Data Editor", command=lambda: on_tape_id_selected(selected_tape_id.get()))
     launch_editor_button.grid(row=1, column=18, columnspan=2, sticky=tk.NSEW)
     #launch_editor_button.config(state=tk.DISABLED)
     
