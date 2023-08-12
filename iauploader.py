@@ -11,7 +11,7 @@ else:
     delimeter = '/'
 scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
-config.read(scriptPath + delimeter + 'config.ini')
+config.read(os.path.join(scriptPath,'config.ini'))
 
 vhs_json_file = config['social']['json file']
 vhs_directory = config['social']['video directory']
@@ -78,9 +78,10 @@ def uploadToArchive(files):
     metadata = {}
     metadata['title'] = tape_name
     metadata['mediatype'] = 'movies'
+    metadata['collection'] = "Community movies"
     metadata['description'] = ''
+    
     for thisEntry in tapeSorted:
-        
         metadata['description'] += thisEntry['Segment Start']+' - '+thisEntry['Segment End']
         metadata['description'] += ", "+thisEntry['Programs']
         metadata['description'] += ", "+thisEntry['Network/Station']+" "+thisEntry['Location']
@@ -101,3 +102,34 @@ def uploadToArchive(files):
     #print("upload("+tape_name+", files="+str(files)+", metadata="+str(metadata)+", verbose=True)")
     u = internetarchive.upload(tape_name, files=files, metadata=metadata, verbose=True)
     print("UPLOAD COMPLETE AT",datetime.datetime.now())
+    
+def uploadClipToArchive(file,clip_json_file):
+    if file == None:
+        directorypath = selectDirectory()
+    j = open(clip_json_file,)
+    tapeData = json.load(j)
+    #thisTape = []
+    for entry in tapeData:
+        if entry["Filename"] == os.path.basename(file):
+            thisClip = entry
+    #tapeSorted = sorted(thisTape, key=lambda d: d['Order on Tape'])
+    metadata = {}
+    metadata['title'] = thisClip["Title"] + " " + thisClip["Network/Station"]+ " " + thisClip["Air Date"]
+    metadata['mediatype'] = 'movies'
+    metadata['description'] = thisClip["Network/Station"]+" - "+ thisClip["Location"] + "\n" + thisClip["Description"] + "\n\n" + "Clipped from " + thisClip["Tape ID"] + " frames " + str(thisClip["Frame Range"][0]) +" - "+ str(thisClip["Frame Range"][1])
+    metadata['date'] = thisClip["Air Date"]
+    tags_split = thisClip["Tags"].split(',')
+    tags_string = ""
+    for tag in tags_split:
+        tag = tag.strip()
+        tags_string += tag+';'
+    tags_string = tags_string.rstrip(';')
+    metadata['subject'] = tags_string
+    metadata['collection'] = "Community movies"
+    identifier = thisClip["Tape ID"] + "_" + str(thisClip["Frame Range"][0]) + "-" + str(thisClip["Frame Range"][1])
+    for key, value in metadata.items():
+        print(key+": "+str(value))
+    #print("upload("+tape_name+", files="+str(files)+", metadata="+str(metadata)+", verbose=True)")
+    u = internetarchive.upload(identifier, files=[file], metadata=metadata, verbose=True)
+    print("UPLOAD COMPLETE AT "+datetime.datetime.now().strftime("%H:%M:%S"),end='\n\n')
+    print("-----------------------------------------------------")

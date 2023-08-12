@@ -15,12 +15,10 @@ import os
 import PIL
 import pytesseract
 import re
-#import speech_recognition as sr
 import sys
 import time
 import tkinter as tk
 import torch
-#import torchvision
 import torchvision.transforms as transforms
 import traceback
 import urllib.request
@@ -34,17 +32,12 @@ from skimage.metrics import structural_similarity as ssim
 from spellchecker import SpellChecker
 from tkinter import ttk
 from torch import hub
-#from torchvision.models import video as vid
-#from torchvision.io.video import read_video
-#from torchvision.models.video import r3d_18, R3D_18_Weights
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor #Wav2Vec2Tokenizer 
 
 scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(os.path.join(scriptPath,'config.ini'))
 json_file = config['analysis']['json file']
-confidence_threshold = float(config['analysis']['yolo confidence'])
-video_language = config['analysis']['video language']
 openai.api_key = config['analysis']['openai api key']
 
 nltk.download('words')
@@ -83,110 +76,6 @@ def enhance_edges(image):
     
     return morphed
 
-def score_frame(frames, model, original_frames, object_summary={}):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model.to(device)
-    prev_texts = []
-    max_distance = 50
-    objects = []
-    dict_array = []  # Initialize dict_array outside the loop
-    
-    with alive_bar(len(frames), force_tty=False) as bar:
-        for frame, original_frame in zip(frames, original_frames):
-            x_shape, y_shape = frame.shape[1], frame.shape[0]
-            results = model(frame)
-            detections = format(results).split('\n')[0].split(':', 1)[1].split(' ', 2)[2]
-
-            data = results.pandas().xyxy[0]
-
-            entry_dict = []  # Initialize as a list
-            for _, row in data.iterrows():
-                if row['confidence'] >= confidence_threshold:
-                    object_type = row['name']
-                    confidence = row['confidence']
-                    object_class = row['class']
-                    xmin = row['xmin']
-                    ymin = row['ymin']
-                    xmax = row['xmax']
-                    ymax = row['ymax']
-
-                    x1 = int(xmin)
-                    y1 = int(ymin)
-                    x2 = int(xmax)
-                    y2 = int(ymax)
-                    bgr = (255, 0, 0)
-
-                    label_font = cv2.FONT_HERSHEY_SIMPLEX
-                    cv2.rectangle(original_frame, (x1, y1), (x2, y2), bgr, 2)
-                    cv2.putText(original_frame, f"{object_type} ({confidence:.2f})", (x1, y1), label_font, 0.7, bgr, 2)
-
-                    centroid_x = int((xmin + xmax) / 2)
-                    centroid_y = int((ymin + ymax) / 2)
-
-                    entry_dict.append({
-                        'name': object_type,
-                        'confidence': confidence,
-                        'class': object_class,
-                        'xmin': xmin,
-                        'ymin': ymin,
-                        'xmax': xmax,
-                        'ymax': ymax,
-                        'centroid_x': centroid_x,
-                        'centroid_y': centroid_y
-                    })
-
-            # Perform centroid tracking
-            objects = centroid_tracking(objects, entry_dict, max_distance)
-
-            # Remove disappeared objects
-            objects = [obj for obj in objects if obj.frames_since_seen <= max_distance]
-
-            # Add objects to the summary dictionary and dict_array
-            for obj in objects:
-                object_id = obj.object_id
-                object_type = obj.object_type
-                frame_number = len(object_summary.get(object_id, {}).get('frames', [])) + 1
-
-                if object_id not in object_summary:
-                    object_summary[object_id] = {
-                        'object_type': object_type,
-                        'frames': [frame_number],
-                        'centroid': obj.centroid,
-                        'movement_trajectory': obj.movement_trajectory,
-                        'movement_speed': obj.movement_speed,
-                        'movement_distance': obj.movement_distance
-                    }
-                else:
-                    object_summary[object_id]['frames'].append(frame_number)
-
-                dict_array.append({
-                    'object_id': object_id,
-                    'object_type': object_type,
-                    'frame_number': frame_number,
-                    'centroid': obj.centroid,
-                    'movement_trajectory': obj.movement_trajectory,
-                    'movement_speed': obj.movement_speed,
-                    'movement_distance': obj.movement_distance
-                })
-
-                # Draw tracked objects on the frame
-                for obj in objects:
-                    x, y = obj.centroid
-                    object_id = obj.object_id
-                    cv2.putText(original_frame, f"{obj.object_type} {object_id}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7,(0, 255, 0), 2)
-
-            # Display the processed frame
-            '''cv2.imshow("Processed Frame", original_frame)
-            if cv2.waitKey(1) == ord("q"):
-                break'''
-            bar()
-
-    # Release the video capture and destroy the window
-    video.release()
-    #cv2.destroyAllWindows()
-
-    return dict_array, object_summary
-
 def is_frame_similar(frame1, frame2, threshold):
     # Convert frames to grayscale
     frame1_gray = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
@@ -213,16 +102,52 @@ def perform_local_text_detection(frame):
     else:
         return None
 
-def detect_text_in_video(video_path, frames, x, y, similarity_threshold,progress_label=None,progress_widget=None):
+def label_detection(client, image_content, is_vision_image=False):
+    if is_vision_image == False:
+        _, frame_bytes = cv2.imencode('.jpg', image_content)
+        image = vision.Image(content=frame_bytes.tobytes())
+    else:
+        image = image_content
+    response = client.label_detection(image=image)
+    if response.error.message:
+        raise Exception(
+            '{}\nFor more info on error messages, check: '
+            'https://cloud.google.com/apis/design/errors'.format(
+                response.error.message))
+        return None
+    else:
+        labels = response.label_annotations
+        label_descriptions = [label.description for label in labels if label.score >= 0.9]
+        return label_descriptions
+
+def logo_detection(client, image_content, is_vision_image=False):
+    if is_vision_image == False:
+        _, frame_bytes = cv2.imencode('.jpg', image_content)
+        image = vision.Image(content=frame_bytes.tobytes())
+    else:
+        image = image_content
+    response = client.logo_detection(image=image)
+    if response.error.message:
+        raise Exception(
+            '{}\nFor more info on error messages, check: '
+            'https://cloud.google.com/apis/design/errors'.format(
+                response.error.message))
+        return None
+    else:
+        logos = response.logo_annotations
+        logo_descriptions = [logo.description for logo in logos if logo.score >= 0.9]
+        return logo_descriptions
+
+def detect_text_in_video(video_path, frames, x, y, similarity_threshold,client,redirector=None):
     print("[ACTION] Extracting text from the video")
-    if progress_widget != None:
-        progress_widget['value'] = 0
-        progress_widget['maximum'] = len(frames)
-        progress_label.config(text="")
-    client = vision.ImageAnnotatorClient()
+    if redirector != None:
+        redirector.progress_var.set(0)
+        redirector.progress_widget['maximum'] = len(frames)
+        redirector.progress_label.config(text="")
     frame_count = len(frames)
     text = []
     prev_texts = []
+    logo_descriptions = []
     prev_frame = None  # Store the previous frame
     prev_f = -50
     count = 0
@@ -232,29 +157,38 @@ def detect_text_in_video(video_path, frames, x, y, similarity_threshold,progress
     p = 0
     with alive_bar(frame_count, force_tty=False) as bar:
         for f, frame in enumerate(frames):
+            if f <= 5:
+                if redirector != None:
+                    p+=1
+                    progress_list = get_eta(start_time,p,frame_count)
+                    progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+                bar()
+                continue
             if prev_frame is not None:
                 if is_frame_similar(frame, prev_frame, similarity_threshold) or prev_f > f-25:
                     # Skip text detection if the frame is similar to the previous frame
-                    '''cv2.imshow("Processed Frame", frame)
-                    if cv2.waitKey(1) == ord("q"):
-                        break'''
-                    p+=1
-                    progress_list = get_eta(start_time,p,frame_count)
-                    progress(progress_widget,p,batch_size,progress_label,progress_list)
+                    if redirector != None:
+                        p+=1
+                        progress_list = get_eta(start_time,p,frame_count)
+                        progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                     bar()
                     continue
-            #print("Checking frame for text")
             detected_text = perform_local_text_detection(frame)
-
             if detected_text:
                 #print("Text Detected!")
                 prev_f = f
-                count += 1
+                
                 # Convert frame to bytes
                 _, frame_bytes = cv2.imencode('.jpg', frame)
                 frame_image = vision.Image(content=frame_bytes.tobytes())
 
+                logo_set = set(logo_descriptions)
+                logo_data = set(logo_detection(client, frame_image, is_vision_image=True))
+                count += 1
+                logo_descriptions = list(logo_set.union(logo_data))
+
                 response = client.text_detection(image=frame_image)
+                count += 1
                 frame_text_data = response.text_annotations
                 if response.error.message:
                     raise Exception(
@@ -277,22 +211,19 @@ def detect_text_in_video(video_path, frames, x, y, similarity_threshold,progress
                                 text.append(filtered_text.strip())
                                 prev_texts.append(filtered_text.strip())
                                 print("[TEXT]: " + filtered_text)
-                                #cv2.putText(frame, frame_text.upper(), (int((x - text_width) / 2), int(0.7 * y)),cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-            '''cv2.imshow("Processed Frame", frame)
-            if cv2.waitKey(1) == ord("q"):
-                break'''
             bar()
-            p+=1
-            progress_list = get_eta(start_time,p,frame_count)
-            progress(progress_widget,p,batch_size,progress_label,progress_list)
+            if redirector != None:
+                p+=1
+                progress_list = get_eta(start_time,p,frame_count)
+                progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
             prev_frame = frame  # Update the previous frame
-        progress_list = get_eta(start_time,frame_count,frame_count)
-        progress(progress_widget,frame_count,batch_size,progress_label,progress_list)
+        if redirector != None:
+            progress_list = get_eta(start_time,frame_count,frame_count)
+            progress(redirector.progress_widget,frame_count,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
         #video.release()
         #cv2.destroyAllWindows()
     print("[INFO] Detection Usage Count: "+str(count))
-    return text, count
+    return text, count, logo_descriptions
 
 def similarity_ratio(a, b):
     return SequenceMatcher(None, a, b).ratio()
@@ -359,8 +290,16 @@ def get_video_metadata(json_file, clip_filename, frame_rate=30):
     # Return None if no matching entry is found
     return None
 
-def generate_summary(audio_text,screen_text,metadata):
+def generate_summary(audio_text,screen_text,metadata,logos,labels):
     screen_text_string = '\n'.join(screen_text)
+    # Join elements of nested lists, convert all elements to strings
+    logos = ['\n'.join(item) if isinstance(item, list) else item for item in logos]
+
+    # Flatten the list and convert elements to strings
+    logos = [item for sublist in logos for item in sublist]
+
+    logos_string = '\n'.join(logos)
+    
     video_context = ''
     response = None
     if metadata:
@@ -369,6 +308,10 @@ def generate_summary(audio_text,screen_text,metadata):
         video_context += '\nThe following is text that was detected on screen during the clip, some of it may be repetitive in whole or part:\n'+screen_text_string    
     if audio_text:
         video_context += '\nThe following text is a transcript of the audio from the video clip\n'+audio_text
+    if len(logos) > 0:
+        video_context += '\nThe following text is a list of logos detected in the video, ignore anything that did not exist before the air date.\n'+logos_string
+    if len(labels) > 0:
+        video_context += '\nThe following text is a list of labels of objects detected in three frames of the video, at the 10%, 50% and 90% duration points.\n'+logos_string
     while True:
         try:
             response=openai.ChatCompletion.create(
@@ -388,8 +331,10 @@ def generate_summary(audio_text,screen_text,metadata):
     
     summary = response['choices'][0]['message']['content']
     tokens_used = response['usage']['total_tokens']
+    input_tokens = response['usage']['prompt_tokens']
+    output_tokens = response['usage']['completion_tokens']
 
-    return summary, tokens_used
+    return summary, tokens_used, input_tokens, output_tokens
 
 def get_eta(start_time,f,total_frames):
     seconds_elapsed = time.time() - start_time
@@ -418,7 +363,7 @@ def get_eta(start_time,f,total_frames):
 
     return time_elapsed, frames_per_second, time_remaining
 
-def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list):
+def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var):
     if progress_widget is not None and frames_processed % batch_size == 0:
         time_elapsed, frames_per_second, time_remaining = progress_list
         #print(frames_processed)
@@ -429,9 +374,10 @@ def progress(progress_widget,frames_processed,batch_size,progress_label,progress
         
         progress_label.config(text=str(percentage_complete)+'% '+str(frames_processed)+'/'+str(progress_widget['maximum'])+', '+str(time_elapsed)+'<'+time_remaining+', '+ str(frames_per_second+'f/s'))
         progress_widget['value'] = frames_processed
+        progress_var.set(frames_processed)
         progress_widget.update()
 
-def analyze_video(video_path,progress_label=None,progress_widget=None):
+def analyze_video(video_path,redirector):
     starting_time = datetime.datetime.now()
     try:
         # Open the video file
@@ -493,9 +439,9 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
             audio_text = openai.Audio.transcribe("whisper-1", audio_mp3)
             audio_mp3.close()            
             os.remove(os.path.join(scriptPath, f"{video_name}.mp3"))
-            if progress_widget != None:
-                progress_widget['value'] = 100
-                progress_label.config(text="")
+            if redirector != None:
+                redirector.progress_widget['value'] = 100
+                redirector.progress_label.config(text="")
         else:
             print("[ACTION] Extracting audio transcript")
             audio_wav = open(os.path.join(scriptPath, f"{video_name}.wav"), 'rb')
@@ -508,11 +454,11 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
         print("[ACTION] Preprocessing Frames")
         cap = cv2.VideoCapture(video_path)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if progress_widget != None:
+        if redirector != None:
             try:
-                progress_widget['value'] = 0
-                progress_widget['maximum'] = frame_count
-                progress_label.config(text="")
+                redirector.progress_widget['value'] = 0
+                redirector.progress_widget['maximum'] = frame_count
+                redirector.progress_label.config(text="")
             except Exception as e:
                 print("[ERROR] "+str(e))
                 pass
@@ -530,7 +476,7 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
         with alive_bar(frame_count, force_tty=False) as bar:
             while True:
                 progress_list = get_eta(start_time,f,frame_count)
-                progress(progress_widget,f,batch_size,progress_label,progress_list)
+                progress(redirector.progress_widget,f,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                 ret, frame = video.read()
                 if not ret:
                     frame_diff = frame_count - len(frames)
@@ -554,17 +500,10 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
                 pil_frame = PIL.Image.fromarray(np.uint8(frame))
                 processed = transform(pil_frame)
                 
-                
-                # Apply adaptive thresholding
-                #threshold = cv2.adaptiveThreshold(equalized, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 2)
-                
                 # Perform morphological operations (optional)
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 morphed = cv2.morphologyEx(equalized, cv2.MORPH_CLOSE, kernel)
 
-                # Convert the frame to a numpy array
-                #frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                #frame = frame.transpose(2, 0, 1)  # Change to channel-first format
                 frames.append(frame)
                 gray_frames.append(gray)
                 blurred_frames.append(blurred)
@@ -572,46 +511,50 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
                 sharpened_frames.append(sharpened)
                 morphed_frames.append(morphed)
                 processed_frames.append(processed)
-                '''cv2.imshow("Frame", frame)
-                if cv2.waitKey(1) == ord("q"):
-                    break'''
                 bar()
                 f += 1
             video.release()
-            #cv2.destroyAllWindows()    
         progress_list = get_eta(start_time,frame_count,frame_count)
-        progress(progress_widget,frame_count,batch_size,progress_label,progress_list)
+        progress(redirector.progress_widget,frame_count,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
         #text = extract_text_from_video(blurred_frames, x_shape, y_shape)
-        text, count = detect_text_in_video(video_path, frames, x_shape, y_shape, 0.9,progress_label=progress_label,progress_widget=progress_widget)
+        client = vision.ImageAnnotatorClient()
+        text, count, logos = detect_text_in_video(video_path, frames, x_shape, y_shape, 0.9, client,redirector)
         for i, t in enumerate(text):
             print(str(i)+': '+str(t))
-        # Perform object detection on the frame
-        # Load the YOLOv5 model
-        #yolo_model = hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        #dict_array, object_summary = score_frame(morphed_frames, yolo_model, frames)
-        #print(object_summary)
-        #most_frequent_objects = identify_prominent_objects(object_summary)
-        #Wprint(most_frequent_objects)
-        #object_interactions = analyze_object_interactions(object_summary)
-        #print(object_interactions)
-        '''while True:
-            ret, frame = video.read()
-            if not ret:
-                break
+        print()
 
-            # Preprocess the frame
-            input_frame = transform(frame).unsqueeze(0)
+        chosen_frames = []
+        labels = []
 
-            # Display the processed frame
-            cv2.imshow("Processed Frame", frame)
-            if cv2.waitKey(1) == ord("q"):
-                break'''
-        # Release the video capture and destroy the window
+        # Calculate frame indices for the desired points
+        interval_size = len(frames) // 3
+        middle_frame_index = len(frames) // 2
+        quarter_frame_index = len(frames) // 10
+        three_quarters_frame_index = 9 * len(frames) // 10
+
+        # Choose frames from the calculated indices
+        chosen_frames.append(frames[middle_frame_index])
+        chosen_frames.append(frames[quarter_frame_index])
+        chosen_frames.append(frames[three_quarters_frame_index])
+    
+        for choice in chosen_frames:
+            logos.append(logo_detection(client, choice))
+            detected_labels = label_detection(client, choice)
+            for label in detected_labels:
+                labels.append(label)
+            count += 2
+        
+        for i, t in enumerate(logos):
+            print(str(i)+': '+str(t))        
+
+        for i, t in enumerate(labels):
+            print(str(i)+': '+str(t))
+
         video.release()
         #cv2.destroyAllWindows()
             
         print("Generating a summary using OpenAI")
-        summary, tokens_used = generate_summary(audio_text.text, text, metadata)
+        summary, tokens_used, input_tokens, output_tokens = generate_summary(audio_text.text, text, metadata, logos, labels)
 
         print("Tokens Used: "+str(tokens_used),end='\n\n')
         clip_dict = json.loads(summary)
@@ -624,12 +567,6 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
 
             print("\nAdding metadata to file and renaming")
             metatagger.createMetadata(video_path, directory,clip_dict,outputFile=clip_dict['Filename'])
-            if os.path.exists(os.path.join(directory, clip_dict['Filename'])):
-                print("Success!")
-                # delete the original file
-                #os.remove(video_path)
-            else:
-                print("An error has occurred creating the tagged file")
             
             # Path to the JSON file
             json_file_path = os.path.join(directory, tape_id + "_Clips.json")
@@ -660,6 +597,8 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
                 existing_api_usage = {}
             current_month_year = datetime.datetime.now().strftime("%Y-%m")
             chatgpt_usage = int(tokens_used)
+            chatgpt_input = int(input_tokens)
+            chatgpt_output = int(output_tokens)
             whisper_usage = round(video_duration)
             vision_usage = count
             
@@ -669,6 +608,8 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
                 month_data = {
                     'chatgpt': {
                         'usage': 0,
+                        'input': 0,
+                        'output': 0,
                         'cost': 0
                     },
                     'whisper': {
@@ -686,11 +627,34 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
             print("[ERROR]"+str(e))
             traceback.print_exc()
         
+        try:
+            if os.path.exists(os.path.join(directory, clip_dict['Filename'])):
+                print("Success!")
+                unidentified_files_dir = os.path.join(directory,'_unidentified')
+                os.makedirs(unidentified_files_dir, exist_ok=True)
+                os.rename(video_path, os.path.join(unidentified_files_dir,os.path.basename(video_path)))
+            else:
+                print("An error has occurred creating the tagged file")
+        except Exception as e:
+            print(e)
+            
         month_data['chatgpt']['usage'] += chatgpt_usage
+        
+        try:
+            month_data['chatgpt']['input'] += chatgpt_input
+        except:
+            month_data['chatgpt']['input'] = chatgpt_input
+        try:
+            month_data['chatgpt']['output'] += chatgpt_output
+        except:
+            month_data['chatgpt']['output'] = chatgpt_output
+            
         month_data['whisper']['usage'] += whisper_usage
         month_data['vision']['usage'] += vision_usage
         
-        chatgpt_cost = float(config['analysis']['chatgpt cost'])
+        chatgpt_input_cost = float(config['analysis']['chatgpt input cost'])
+        chatgpt_output_cost = float(config['analysis']['chatgpt output cost'])
+        
         whisper_cost = float(config['analysis']['whisper cost'])
         vision_cost = {
             'tier1': float(config['analysis']['google vision tier 1']),
@@ -700,7 +664,11 @@ def analyze_video(video_path,progress_label=None,progress_widget=None):
         vision_tier1_limit = 1000
         vision_tier2_limit = 5000000
         
-        month_data['chatgpt']['cost'] = month_data['chatgpt']['usage'] * chatgpt_cost
+        try:
+            month_data['chatgpt']['cost'] = (month_data['chatgpt']['input'] * chatgpt_input_cost) + (month_data['chatgpt']['output'] * chatgpt_output_cost)
+        except:
+            month_data['chatgpt']['cost'] = month_data['chatgpt']['usage'] * (chatgpt_input_cost + chatgpt_output_cost)/2
+        
         month_data['whisper']['cost'] = month_data['whisper']['usage'] * whisper_cost
         if month_data['vision']['usage'] <= vision_tier1_limit:
             month_data['vision']['cost'] = month_data['vision']['usage'] * vision_cost['tier1']

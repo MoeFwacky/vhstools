@@ -166,18 +166,20 @@ def selectVideoFile(path, ext):
 
 def splitVideo(entry,startSplit,endSplit,outputName,path):
     prevOutputName = ""
-    clearline()
-    textline(line(),entry)
     filename = os.path.join(path,entry)
     #do the split
-    clearline()
-    textline(line(),"SPLITTING THIS FILE: "+filename)
-    (
-        ffmpeg
-        .input(filename, ss=startSplit, to=endSplit)
-        .output(os.path.join(path,outputName), c='copy', loglevel="quiet")
-        .run()
-    )
+    print("Creating "+outputName+" from "+entry)
+    try:
+        (
+            ffmpeg
+            .input(filename, ss=startSplit, to=endSplit)
+            .output(os.path.join(path,outputName), c='copy', loglevel="error")
+            .run(quiet=True, capture_stderr=True)
+        )
+    except Exception as e:
+        print("[ERROR] ffmpeg command failed with the following error:")
+        print(e.stderr.decode('utf-8'))
+        return        
     x = 1
     prevOutputName = ""
     

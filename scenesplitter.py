@@ -18,7 +18,7 @@ if os.name == 'nt':
     delimeter = '\\'
 else:
     delimeter = '/'
-
+progress_var = tk.IntVar()
 scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
@@ -112,7 +112,7 @@ def getFrameRate(file):
 def scale_number(unscaled, to_min, to_max, from_min, from_max):
     return (to_max-to_min)*(unscaled-from_min)/(from_max-from_min)+to_min
 
-def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list):
+def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var):
     if progress_widget is not None and frames_processed % batch_size == 0:
         time_elapsed, frames_per_second, time_remaining = progress_list
         #print(frames_processed)
@@ -122,7 +122,8 @@ def progress(progress_widget,frames_processed,batch_size,progress_label,progress
         frames_per_second = "{:.2f}".format(frames_per_second)
         
         progress_label.config(text=str(percentage_complete)+'% '+str(frames_processed)+'/'+str(progress_widget['maximum'])+', '+str(time_elapsed)+'<'+time_remaining+', '+ str(frames_per_second+'/s'))
-        progress_widget['value'] = frames_processed
+        #progress_widget.configure(value=frames_processed)
+        progress_var.set(frames_processed)
         progress_widget.update()
 
 def get_eta(start_time,f,total_frames):
@@ -152,7 +153,7 @@ def get_eta(start_time,f,total_frames):
 
     return time_elapsed, frames_per_second, time_remaining
 
-def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30, divisor=divisor, clip_min=(minLength),progress_label=None,progress_widget=None):
+def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30, divisor=divisor, clip_min=(minLength),redirector=None):
     minimum_clip_frames = clip_min*frameRate
     with open(json_filename) as json_file:
         try:
@@ -165,7 +166,7 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
             silence_threshold = json_data['analysis']['silence_threshold']
         except:
             print("[ACTION] OLD JSON VERSION DETECT, RE-SCANNING",videoFile)
-            videoscanner.scanVideo(videoFile,tape_directory,progress_label=progress_label,progress_widget=progress_widget)            
+            videoscanner.scanVideo(videoFile,tape_directory,frameRate,redirector)            
             with open(json_filename) as json_file:
                 json_data = json.load(json_file)
                 number_of_frames = int(json_data['analysis']['total frames'])
@@ -181,8 +182,8 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
         scene_list = []
         selected_frame_data = json_data['frames'][0]
         #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-        if progress_widget != None:
-            progress_widget['maximum'] = math.ceil(number_of_frames)
+        if redirector != None:
+            redirector.progress_widget['maximum'] = math.ceil(number_of_frames)
         batch_size = 10  # Adjust the batch size as needed
         loudness_change = 0
         loudness = 0
@@ -195,7 +196,7 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
                 else:
                     frame += 1
                     progress_list = get_eta(start_time,frame,number_of_frames)
-                    progress(progress_widget,frame,batch_size,progress_label,progress_list)
+                    progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                     bar()
                     try:
                         start_frame_data = json_data['frames'][frame]
@@ -212,22 +213,26 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
                             last_frame_data = json_data['frames'][frame]
                         except IndexError:
                             progress_list = get_eta(start_time,frame-1,number_of_frames)
-                            progress(progress_widget,frame-1,batch_size,progress_label,progress_list)
+                            progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                             bar()
                             break
                         
                         #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
                         rgb = last_frame_data['rgb']
-                        if frame <=totalFrames-2:
-                            trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
-                            trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
-                            trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
-                            trailing_rgb_trend_up = True if trailing_slope > 0 else False
-                        else:
+                        try:
+                            if frame <=totalFrames-2:
+                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                            else:
+                                trailing_rgb_trend_up = True
+                        except IndexError:
                             trailing_rgb_trend_up = True
+                            break
                         loudness = last_frame_data['loudness']
                         progress_list = get_eta(start_time,frame-1,number_of_frames)
-                        progress(progress_widget,frame-1,batch_size,progress_label,progress_list)
+                        progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                         bar()
 
                         loudness = last_frame_data['loudness']
@@ -288,7 +293,7 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
                             
                             loudness = last_frame_data['loudness']
                             progress_list = get_eta(start_time,frame,number_of_frames)
-                            progress(progress_widget,frame,batch_size,progress_label,progress_list)                            
+                            progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)                            
                             bar()
                     except IndexError:
                         #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
@@ -305,7 +310,7 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
                                 trailing_rgb_trend_up = True
                             loudness = last_frame_data['loudness']
                             progress_list = get_eta(start_time,frame-1,number_of_frames)
-                            progress(progress_widget,frame-1,batch_size,progress_label,progress_list)
+                            progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
                             bar()
                         except IndexError:
                             break
@@ -353,7 +358,7 @@ def saveSplitScene(scene, file, path, startSplit, endSplit, frameRate):
     except ffmpeg.Error as e:
         print(e)
 
-def processVideo(videoFile=None, path=os.getcwd(),progress_label=None,progress_widget=None):
+def processVideo(videoFile=None, path=os.getcwd(),redirector=None):
     os.chdir(path)
 
     if videoFile == None:
@@ -371,7 +376,8 @@ def processVideo(videoFile=None, path=os.getcwd(),progress_label=None,progress_w
     if tape_directory == '':
         tape_directory = path
     dirname, tape_name  = os.path.split(videoFile)
-    tape_name = tape_name.split('.')[0]
+    filename_split = tape_name.split('.')
+    tape_name = filename_split[0]
     t, file_extension = os.path.splitext(videoFile)
     
     
@@ -389,13 +395,14 @@ def processVideo(videoFile=None, path=os.getcwd(),progress_label=None,progress_w
 
     if os.path.exists(STATS_FILE) == False:
         print("[ACTION] JSON DATA FILE NOT FOUND, SCANNING",tape_name)
-        videoscanner.scanVideo(os.path.join(tape_directory,videoFile),tape_directory,progress_label=progress_label,progress_widget=progress_widget)
+        videoscanner.scanVideo(os.path.join(tape_directory,videoFile),tape_directory,redirector)
 
-    scene_list = getScenes(videoFile,tape_directory,STATS_FILE,totalFrames,frameRate,progress_label=progress_label,progress_widget=progress_widget)
+    print("[ACTION] Detecting Scenes")
+    scene_list = getScenes(videoFile,tape_directory,STATS_FILE,totalFrames,frameRate,redirector=redirector)
     
     print("[ACTION] Exporting scene files to "+outputPath)
-    if progress_widget != None:
-        progress_widget['maximum'] = math.ceil(len(scene_list))
+    if redirector != None:
+        redirector.progress_widget['maximum'] = math.ceil(len(scene_list))
     batch_size = 1  # Adjust the batch size as needed
     start_time = time.time()
     with alive_bar(int(len(scene_list)), force_tty=False) as bar2:
@@ -403,6 +410,7 @@ def processVideo(videoFile=None, path=os.getcwd(),progress_label=None,progress_w
         for scene in scene_list:
             startFrame = scene['start_frame']
             endFrame = scene['end_frame']
+            #print("[ACTION] Exporting scene files to "+str(os.path.join(outputPath,tape_name+"_"+str(startFrame)+"-"+str(endFrame)+"."+filename_split[1])),end='\r')
             #print('ENCODING SCENE',scene['scene'],end=': ')
             sceneDuration = (int(endFrame) - int(startFrame)) / frameRate
             #print('Duration',convert(sceneDuration),end='\t\r')
@@ -412,7 +420,7 @@ def processVideo(videoFile=None, path=os.getcwd(),progress_label=None,progress_w
             '''for i in range(int(startFrame),int(endFrame)):
                 bar2()'''
             progress_list = get_eta(start_time,s,len(scene_list))
-            progress(progress_widget,s,batch_size,progress_label,progress_list)
+            progress(redirector.progress_widget,s,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
             bar2()
             s += 1
         '''for r in range(int(endFrame), int(totalFrames)):

@@ -44,7 +44,7 @@ else:
 
 def start_processing():
     # Call the process_frames function with update_progress as the progress_callback argument
-    process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_callback=update_progress)
+    process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_callback=update_progress, progress_var=progress_var)
 
 def convert(seconds): 
     try:
@@ -156,7 +156,7 @@ def selectVideo():
     print("CONFIRMED!")
     return dirDict[fileSelection], totalFrames, path
 
-def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list):
+def progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var):
     if progress_widget is not None and frames_processed % batch_size == 0:
         time_elapsed, frames_per_second, time_remaining = progress_list
         #print(frames_processed)
@@ -166,7 +166,8 @@ def progress(progress_widget,frames_processed,batch_size,progress_label,progress
         frames_per_second = "{:.2f}".format(frames_per_second)
         
         progress_label.config(text=str(percentage_complete)+'% '+str(frames_processed)+'/'+str(progress_widget['maximum'])+', '+str(time_elapsed)+'<'+time_remaining+', '+ str(frames_per_second+'f/s'))
-        progress_widget['value'] = frames_processed
+        #progress_widget['value'] = frames_processed
+        progress_var.set(frames_processed)
         progress_widget.update()
 
 def get_eta(start_time,f,total_frames):
@@ -196,7 +197,7 @@ def get_eta(start_time,f,total_frames):
 
     return time_elapsed, frames_per_second, time_remaining
 
-def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget):
+def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget,progress_var):
     fps = FPS().start()
     video = FileVideoStream(videoFile).start()
     audio = AudioSegment.empty()
@@ -262,7 +263,8 @@ def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_lab
     frames_processed = 0
     #print("[INFO] Resetting Progress Bar")
     if progress_widget != None:
-        progress_widget['value'] = 0
+        #progress_widget['value'] = 0
+        progress_var.set(0)
         progress_widget['maximum'] = total_frames_with_progress
         
     batch_size = 84  # Adjust the batch size as needed
@@ -299,32 +301,32 @@ def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_lab
 
             frames_processed += 1
             progress_list = get_eta(start_time,f,total_frames_with_progress)
-            progress(progress_widget,frames_processed,batch_size,progress_label,progress_list)
+            progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
             '''if progress_widget is not None and frames_processed % batch_size == 0:
                 progress_widget['value'] = frames_processed
                 progress_widget.update()'''
             bar()
         progress_list = get_eta(start_time,f,total_frames_with_progress)
         # Update progress and output widgets for the remaining frames
-        progress(progress_widget,frames_processed,batch_size,progress_label,progress_list)
+        progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
         video.stop()
         
 
     return file_data, rgb_values, loudness_values
     
-def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None, progress_label=None, progress_widget=None):
-    print("PATH:",path)
+def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None, redirector=None):
     os.chdir(path)
+    progress_var = tk.IntVar()
     if path[-1] != delimeter:
         path = path + delimeter
     if videoFile == None:
         videoFile, totalFrames, path = selectVideo()
-    elif videoFile != None and totalFrames == None:
+    elif videoFile != None:
         frameRate, fileDuration, lengthFormatted = getFrameRateDuration(videoFile)
         #print(frameRate, fileDuration, lengthFormatted)
         totalFrames = round(float(fileDuration*float(frameRate)))
 
-    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget)
+    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration, redirector.progress_label, redirector.progress_widget, redirector.progress_var)
     file_data['analysis'] = {'total frames':totalFrames,
         'min_rgb':min(rgb_values),
         'max_rgb':max(rgb_values),

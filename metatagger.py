@@ -104,12 +104,12 @@ def editMetadata(filename,outputPath,metadata,outputFile=None):
 
 def createMetadata(filename,outputPath,metadata,outputFile):
     outputFile = os.path.join(outputPath,outputFile)
-    print(filename)
-    print(outputFile)
-    print('')
+    #print(filename)
+    #print(outputFile)
+    #print('')
 
     try:
-        print("Processing metadata with ffmpeg")
+        #print("Processing metadata with ffmpeg")
         (
             ffmpeg
             .input(filename)
