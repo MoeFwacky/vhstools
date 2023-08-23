@@ -38,7 +38,7 @@ VHS Tools is a powerful and user-friendly application designed to simplify the p
 
 ## Contributing
 
-Contributions to improve and enhance VHS Tools are welcome. If you encounter issues or have suggestions, please report them on the [GitHub repository's issue tracker](https://github.com/yourusername/vhs-tools/issues).
+Contributions to improve and enhance VHS Tools are welcome. If you encounter issues or have suggestions, please report them on the [GitHub repository's issue tracker](https://github.com/MoeFwacky/vhstools/issues).
 
 ## License
 
