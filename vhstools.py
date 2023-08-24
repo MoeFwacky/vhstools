@@ -8,26 +8,25 @@ import metatagger
 import numpy as np
 import os
 import random
-import ray
 import re
 import string
 import sys
 import threading
 import time
 import tkinter as tk
-import tqdm
+#import tqdm
 import vlc
 import webbrowser
-from alive_progress import alive_bar
 from tkinter import filedialog
 from tkinter import messagebox
 from tkinter import scrolledtext
 from tkinter import ttk
 
 scriptPath = os.path.realpath(os.path.dirname(__file__))
+tv_ico = os.path.join(scriptPath,'tv.ico')
 config = configparser.ConfigParser()
 config.read(os.path.join(scriptPath,'config.ini'))
-json_file = config['analysis']['json file']
+json_file = config['directories']['json file']
 
 class VideoPlayer(tk.Frame):
     def __init__(self, master=None, media_path=None):
@@ -738,43 +737,80 @@ def launch_socialbot(file=None,directory=None,socials={},persist=False):
     print(":::::|__     ||  _  |  __||  ||  _  ||  |   __ <|  _  ||   _|::::::")
     print(":::::|_______||_____|____||__||___._||__|______/|_____||____|::::::")
     print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
-    ray.init()
+    #ray.init()
     if file != None:
-        @ray.remote
+        '''@ray.remote
         def Social():
-            getvid.social([args.filename],socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)
+            getvid.social([args.filename],socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)'''
+        social = threading.Thread(target=getvid.social,args=([args.filename],), kwargs={
+        'facebook': socials['facebook'],
+        'twitter': socials['twitter'],
+        'tumblr': socials['tumblr'],
+        'useMastodon': socials['mastodon'],
+        'useDiscord': socials['discord'],
+        'persist': persist
+    })
     elif directory != None:
-        @ray.remote
+        '''@ray.remote
         def Social():
             vidList = getvid.list_videos(directory)
-            getvid.social(vidList,socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)
+            getvid.social(vidList,socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)'''
+        vidList = getvid.list_videos(directory)
+        social = threading.Thread(target=getvid.social,args=(vidList,),kwargs={
+        'facebook': socials['facebook'],
+        'twitter': socials['twitter'],
+        'tumblr': socials['tumblr'],
+        'useMastodon': socials['mastodon'],
+        'useDiscord': socials['discord'],
+        'persist': persist
+    })
     else:
-        @ray.remote
+        '''@ray.remote
         def Social():
             vidList = getvid.list_videos(getvid.directory)
-            getvid.social(vidList,socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)
-    rayList = []
-    rayList.append(Social.remote())
+            getvid.social(vidList,socials['facebook'], socials['twitter'], socials['tumblr'], socials['mastodon'], socials['discord'], persist)'''
+        social = threading.Thread(target=getvid.social,args=(vidList,),kwargs={
+        'facebook': socials['facebook'],
+        'twitter': socials['twitter'],
+        'tumblr': socials['tumblr'],
+        'useMastodon': socials['mastodon'],
+        'useDiscord': socials['discord'],
+        'persist': persist
+    })
+    social.start()
+    threads = []
+    threads.append(social)
+    #rayList = []
+    #rayList.append(Social.remote())
     if socials['discord'] != False:
-        @ray.remote
+        '''@ray.remote
         def DiscordBot():
             listentosocial.checkDiscord()
-        rayList.append(DiscordBot.remote())
+        rayList.append(DiscordBot.remote())'''
+        discord_listen = threading.Thread(target=listentosocial.checkDiscord)
+        discord_listen.start()
+        threads.append(discord_listen)
     #for i in range(0,250):
     if socials['twitter'] != False:
-        @ray.remote
-        def TwitterBot():
+        #@ray.remote
+        '''def TwitterBot():
             listentosocial.checkTwitter()
-        rayList.append(TwitterBot.remote())
+        rayList.append(TwitterBot.remote())'''
+        twitter_listen = threading.Thread(target=listentosocial.checkTwitter)
+        threads.append(twitter_listen)
     if socials['mastodon'] != False:
-        @ray.remote
-        def MastodonBot():
+        #@ray.remote
+        '''def MastodonBot():
             listentosocial.checkMastodon()
-        rayList.append(MastodonBot.remote())
-    try:
+        rayList.append(MastodonBot.remote())'''
+        mastodon_listen = threading.Thread(garget=listentosocial.checkMastodon)
+        threads.append(mastodon_listen)
+    '''try:
         ray.get(rayList)
     except Exception as e:
-        print(e)
+        print(e)'''
+    for t in threads:
+        t.join()
 
 def on_archiver_select(option,script="Archiver"):
     global is_clip
@@ -938,26 +974,23 @@ def show_about_dialog():
     
     # About dialog text
     about_text = """
-    VHS Tools - Version: 20230714
+    VHS Tools
     Developer: Moe Fwacky
-    Repository: https://github.com/MoeFwacky/videotools
+    Repository: github.com/MoeFwacky/vhstools
     VHS Tools is released under the GNU General Public License (GPL).
     
-    VHS Tools is a multifunctional script designed for video analysis, editing, and social sharing. 
-    It provides various tools for processing video files, extracting metadata, and performing automated video editing functions."""
+    VHS Tools is a powerful and user-friendly application designed to 
+    simplify the process of extracting, analyzing, and identifying clips 
+    from large video files of old broadcast TV content, often taken 
+    from digitized VHS tapes. Whether you're an experienced video 
+    archivist or new to the world of preservation, VHS Tools offers a 
+    comprehensive solution for navigating through extensive footage and 
+    transforming it into organized, shareable content."""
 
-    function_text= """
-    Scanner - The Scanner tool analyzes video files to gather audio levels and frame brightness data for further analysis and processing.
-    Splitter - The Splitter tool analyzes the Scanner's saved JSON data to determine split points, primarily for extracting commercial files from recordings of broadcast TV.
-    Identifier - The Identifier tool utilizes AI algorithms to analyze video clips, extracting audio transcripts, on-screen text, and other available data to generate comprehensive metadata.
-    Archiver - The Archiver tool facilitates the uploading of video files to the Internet Archive, utilizing available metadata for the upload process.
-    Video Editor - The Video Editor tool enables automated video editing functions based on a JSON file, providing a convenient way to perform advanced editing operations.
-    Metatagger - The Metatagger tool allows users to add and modify metadata for video files, enhancing their organization and accessibility.
-    Vid2Social - The Vid2Social tool automates social sharing by randomly uploading video clips to various social media platforms at regular intervals.
-    SocialBot - The SocialBot tool enables users to issue commands to obtain specific video clips on demand, streamlining the retrieval process."""
+    function_text= """"""
 
     footer_text="""
-    For more information, support, or to contribute, please visit the project repository at the provided link or by clicking the button below.
+    For more information, support, to report bugs/issues, or to contribute, please visit the project repository at the provided link or by clicking the button below.
 
     Thank you for using VHS Tools!
     """
@@ -1373,7 +1406,7 @@ else:
         if clip_editor is None:
             clip_editor = tk.Toplevel()
             clip_editor.title("Clip Data Editor")
-            clip_editor.iconbitmap("tv.ico")
+            clip_editor.iconbitmap(tv_ico)
             clip_editor.geometry("666x966")
             launchloop = True
 
@@ -1682,7 +1715,7 @@ else:
         if gui is None:
             gui = tk.Toplevel()
             gui.title("Tape Data Editor")
-            gui.iconbitmap("tv.ico")
+            gui.iconbitmap(tv_ico)
             gui.geometry("666x933")
             launchloop = True
 
@@ -2131,7 +2164,7 @@ else:
         if clip_navigator is None:
             clip_navigator = tk.Toplevel()
             clip_navigator.title("Unidentified Clip Navigator")
-            clip_navigator.iconbitmap("tv.ico")
+            clip_navigator.iconbitmap(tv_ico)
             clip_navigator.geometry("666x850")
             launchloop = True
 
@@ -2427,7 +2460,7 @@ else:
     help_menu.add_command(label="About", command=show_about_dialog)
     
     window.config(menu=menu_bar)
-    window.iconbitmap("tv.ico")
+    window.iconbitmap(tv_ico)
     
     for i in range(20):
         window.grid_rowconfigure(i,weight=1,uniform="equal")

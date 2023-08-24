@@ -14,9 +14,10 @@ import os
 import pytumblr
 import pytz
 import random
-import ray
+#import ray
 import requests
 import sys
+import threading
 import time
 import tweepy
 import videoscanner
@@ -34,15 +35,17 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
 
-vhs_json_file = config['social']['json file']
-directory = config['social']['video directory']
-temp_directory = config['social']['temp directory']
+vhs_json_file = config['directories']['json file']
+directory = config['directories']['video directory']
+temp_directory = config['directories']['temp directory']
 scene_rgb = int(config['social']['rgb threshold'])
 loop_time = int(config['social']['time between'])
 clip_length = int(config['social']['clip minimum'])
 clip_maximum = int(config['social']['clip maximum'])
 file_max = int(config['social']['file size maximum'])
 buffer_frames = [int(config['social']['front buffer']),int(config['social']['end buffer'])]
+divisor = int(config['scenesplitter']['median divisor'])
+silence_threshold = int(config['scenesplitter']['silence threshold'])
 
 def next_thirty():
     current_time = time.time()
@@ -87,19 +90,19 @@ def get_frame(json_filename, frameRate=30, scene_rgb=scene_rgb,clip_length=int(c
                 random_frame = random.sample(range(buffer_frames[0],number_of_frames-buffer_frames[1]),1)
         else:
             random_frame = random.sample(range(buffer_frames[0],number_of_frames-buffer_frames[1]),1)
-        scene_rgb = scale_number(json_data['analysis']['median_rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])/3
+        scene_rgb = json_data['analysis']['median_rgb']/divisor
         random_frame = random_frame[0]
         selected_frame_data = json_data['frames'][random_frame]
         rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
         try:
             while float(rgb) > scene_rgb:
-                random_frame = random_frame + 1
+                random_frame += 1
                 selected_frame_data = json_data['frames'][random_frame]
                 rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
                 #print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                 #start_frame = random_frame
-                while not (json_data['frames'][random_frame-2]['rgb'] > json_data['frames'][random_frame-1]['rgb'] > json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] < json_data['frames'][random_frame+2]['rgb']):
-                    random_frame = random_frame + 1
+                while not (rgb < scene_rgb and json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] and json_data['frames'][random_frame]['loudness'] <= silence_threshold):
+                    random_frame += 1
                     #print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                     selected_frame_data = json_data['frames'][random_frame]
                     rgb = scale_number(selected_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
@@ -116,7 +119,7 @@ def get_frame(json_filename, frameRate=30, scene_rgb=scene_rgb,clip_length=int(c
             rgb = scale_number(last_frame_data['rgb'],0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
             #print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
         while float(rgb) > scene_rgb and (random_frame-start_frame)/frameRate <= clip_max:
-            random_frame = random_frame + 1
+            random_frame += 1
             try:
                 last_frame_data = json_data['frames'][random_frame]
                 rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
@@ -126,8 +129,8 @@ def get_frame(json_filename, frameRate=30, scene_rgb=scene_rgb,clip_length=int(c
                 break                
             #print("FRAME NUMBER "+str(random_frame)+" SELECTED, RGB = "+str(rgb),end='\r')
             try:
-                while not (json_data['frames'][random_frame-2]['rgb'] > json_data['frames'][random_frame-1]['rgb'] > json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] < json_data['frames'][random_frame+2]['rgb']):
-                    random_frame = random_frame + 1
+                while not (rgb < scene_rgb and json_data['frames'][random_frame]['rgb'] < json_data['frames'][random_frame+1]['rgb'] and json_data['frames'][random_frame]['loudness'] <= silence_threshold or (random_frame-start_frame)/frameRate >= clip_max):
+                    random_frame += 1
                     last_frame_data = json_data['frames'][random_frame]
                     rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
             except IndexError as e:
@@ -234,6 +237,7 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
             print(e)
             all_videos = videos
 
+    threads = []
     while True:
         tapeID = None
         thisEntry = None
@@ -431,7 +435,7 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
         rays = []
         returns = 0
         if twitter != False:
-            @ray.remote
+            #@ray.remote
             def tw():
                 blocking_statuses = ['pending', 'in_progress']
                 try:
@@ -477,11 +481,14 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
                 else:
                     print("VIDEO NOT UPLOADED, SKIPPING TWEET")
             returns += 1
-            rays.append(tw.remote())
+            twitter_thread = threading.Thread(target=tw)
+            twitter_thread.start()
+            threads.append(twitter_thread)
+            #rays.append(tw.remote())
             #return True
 
         if tumblr != False:
-            @ray.remote
+            #@ray.remote
             def tb():
                 try:
                     tumblrCaption = "Tape ID: "+tapeID+"<br>Timestamp: "+frame['ts'].split('.')[0]+"<br>Program: "+program+"<br>Network/Station: "+station+"<br>Broadcast Location: "+location+"<br>Air Date: "+airDateLong
@@ -498,11 +505,14 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
                     print("ERROR: COULD NOT POST VIDEO TO TUMBLR")
                     print(e)
             returns += 1
-            rays.append(tb.remote())
+            tumblr_thread = threading.Thread(target=tb)
+            tumblr_thread.start()
+            threads.append(tumblr_thread)
+            #rays.append(tb.remote())
             #return True
 
         if facebook != False:
-            @ray.remote
+            #@ray.remote
             def fb():
                 try:
                     facebookCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nAir Date: "+airDateLong+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\n"+hashtagString
@@ -521,11 +531,14 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
                     print("ERROR UPLOADING TO FACEBOOK")
                     print(e)
             returns += 1
-            rays.append(fb.remote())
+            facebook_thread = threading.Thread(target=fb)
+            facebook_thread.start()
+            threads.append(facebook_thread)
+            #rays.append(fb.remote())
             #return True
         
         if useMastodon != False:
-            @ray.remote
+            #@ray.remote
             def mast():
                 try:
                     mastodonCaption = "Tape ID: "+tapeID+"\nTimestamp: "+frame['ts'].split('.')[0]+"\nProgram: "+program+"\nNetwork/Station: "+station+"\nBroadcast Location: "+location+"\nAir Date: "+airDateLong+"\n"+"#bot "+hashtagString
@@ -563,11 +576,14 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
                 else:
                     print("VIDEO NOT UPLOADED, SKIPPING TOOT")
             returns += 1
-            rays.append(mast.remote())
+            mastodon_thread = threading.Thread(target=mast)
+            mastodon_thread.start()
+            threads.append(mastodon_thread)
+            #rays.append(mast.remote())
             #return True
 
         if useDiscord != False:
-            @ray.remote
+            #@ray.remote
             def disc(clip_duration=clip_duration):
                 crfValue = 28
                 render_video(temp_directory+delimeter+'clip.mp4','foundonvhs.mp4',0,clip_duration,crf=crfValue)
@@ -613,13 +629,18 @@ def social(videos,facebook=False,twitter=False,tumblr=False,useMastodon=False,us
                     print(e)
                 os.remove(temp_directory+delimeter+'foundonvhs.mp4')
             returns += 1
-            rays.append(disc.remote())
+            discord_thread = threading.Thread(target=disc)
+            discord_thread.start()
+            threads.append(discord_thread)
+            #rays.append(disc.remote())
             #return True
 
         try:
-            ray.get(rays)
+            '''ray.get(rays)
             while len(rays) > 0:
-                done, rays = ray.wait(rays)
+                done, rays = ray.wait(rays)'''
+            for t in threads:
+                t.join()
             print("ALL SOCIAL POSTING PROCESSES COMPLETE AT", datetime.now())
             if int(len(all_videos)) <= 1:
                 print("RESETTING VIDEO LIST")

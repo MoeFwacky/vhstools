@@ -13,8 +13,12 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(os.path.join(scriptPath,'config.ini'))
 
-vhs_json_file = config['social']['json file']
-vhs_directory = config['social']['video directory']
+vhs_json_file = config['directories']['json file']
+vhs_directory = config['directories']['video directory']
+
+#Internet Archive API Keys
+access_key = config['internet archive']['access key']
+secret_key = config['internet archive']['secret key']
 
 def list_videos(directory):
     all_videos = []
@@ -100,7 +104,7 @@ def uploadToArchive(files):
     
     print(metadata['description'])
     #print("upload("+tape_name+", files="+str(files)+", metadata="+str(metadata)+", verbose=True)")
-    u = internetarchive.upload(tape_name, files=files, metadata=metadata, verbose=True)
+    u = internetarchive.upload(tape_name, files=files, metadata=metadata, verbose=True, access_key=access_key, secret_key=secret_key)
     print("UPLOAD COMPLETE AT",datetime.datetime.now())
     
 def uploadClipToArchive(file,clip_json_file):
@@ -125,11 +129,11 @@ def uploadClipToArchive(file,clip_json_file):
         tags_string += tag+';'
     tags_string = tags_string.rstrip(';')
     metadata['subject'] = tags_string
-    metadata['collection'] = "Community movies"
+    #metadata['collection'] = "Community movies"
     identifier = thisClip["Tape ID"] + "_" + str(thisClip["Frame Range"][0]) + "-" + str(thisClip["Frame Range"][1])
     for key, value in metadata.items():
         print(key+": "+str(value))
     #print("upload("+tape_name+", files="+str(files)+", metadata="+str(metadata)+", verbose=True)")
-    u = internetarchive.upload(identifier, files=[file], metadata=metadata, verbose=True)
+    u = internetarchive.upload(identifier, files=[file], metadata=metadata, verbose=True, access_key=access_key, secret_key=secret_key)
     print("UPLOAD COMPLETE AT "+datetime.datetime.now().strftime("%H:%M:%S"),end='\n\n')
     print("-----------------------------------------------------")

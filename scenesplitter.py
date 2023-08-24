@@ -11,7 +11,7 @@ import sys
 import time
 import tkinter as tk
 import videoscanner
-from alive_progress import alive_bar
+#from alive_progress import alive_bar
 from webcolors import CSS3_HEX_TO_NAMES, hex_to_rgb
 
 if os.name == 'nt':
@@ -188,52 +188,88 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
         loudness_change = 0
         loudness = 0
         start_time = time.time()
-        with alive_bar(number_of_frames, force_tty=False) as bar:
-            while frame < totalFrames-1:
-                if frame == 0:
-                    start_frame_data = selected_frame_data
-                    scene_number = 1
-                else:
+        #with alive_bar(number_of_frames, force_tty=False) as bar:
+        while frame < totalFrames-1:
+            if frame == 0:
+                start_frame_data = selected_frame_data
+                scene_number = 1
+            else:
+                frame += 1
+                progress_list = get_eta(start_time,frame,number_of_frames)
+                progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+                #bar()
+                try:
+                    start_frame_data = json_data['frames'][frame]
+                except IndexError:
+                    #bar()
+                    break
+                scene_number = scene_number + 1
+            rgb = 256
+            #colorMatch = False
+            while float(rgb) > scene_rgb and frame < totalFrames-1:
+                while frame <= (start_frame_data['f'] + minimum_clip_frames):
                     frame += 1
-                    progress_list = get_eta(start_time,frame,number_of_frames)
-                    progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                    bar()
                     try:
-                        start_frame_data = json_data['frames'][frame]
+                        last_frame_data = json_data['frames'][frame]
                     except IndexError:
-                        bar()
-                        break
-                    scene_number = scene_number + 1
-                rgb = 256
-                #colorMatch = False
-                while float(rgb) > scene_rgb and frame < totalFrames-1:
-                    while frame <= (start_frame_data['f'] + minimum_clip_frames):
-                        frame += 1
-                        try:
-                            last_frame_data = json_data['frames'][frame]
-                        except IndexError:
-                            progress_list = get_eta(start_time,frame-1,number_of_frames)
-                            progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                            bar()
-                            break
-                        
-                        #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                        rgb = last_frame_data['rgb']
-                        try:
-                            if frame <=totalFrames-2:
-                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
-                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
-                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
-                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
-                            else:
-                                trailing_rgb_trend_up = True
-                        except IndexError:
-                            trailing_rgb_trend_up = True
-                            break
-                        loudness = last_frame_data['loudness']
                         progress_list = get_eta(start_time,frame-1,number_of_frames)
                         progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                        bar()
+                        #bar()
+                        break
+                    
+                    #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                    rgb = last_frame_data['rgb']
+                    try:
+                        if frame <=totalFrames-2:
+                            trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                            trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                            trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                            trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                        else:
+                            trailing_rgb_trend_up = True
+                    except IndexError:
+                        trailing_rgb_trend_up = True
+                        break
+                    loudness = last_frame_data['loudness']
+                    progress_list = get_eta(start_time,frame-1,number_of_frames)
+                    progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+                    #bar()
+
+                    loudness = last_frame_data['loudness']
+                    loudness_array = []
+                    frame_array = []
+                    if frame-4 >= 0:
+                        loudness_array.append(float(json_data['frames'][frame-4]['loudness']))
+                        frame_array.append(json_data['frames'][frame-4]['f'])
+                    if frame-3 >= 0:
+                        loudness_array.append(float(json_data['frames'][frame-3]['loudness']))
+                        frame_array.append(json_data['frames'][frame-3]['f'])
+                    if frame-2 >= 0:
+                        loudness_array.append(float(json_data['frames'][frame-2]['loudness']))
+                        frame_array.append(json_data['frames'][frame-2]['f'])
+                    if frame-1 >= 0:
+                        loudness_array.append(float(json_data['frames'][frame-1]['loudness']))
+                        frame_array.append(json_data['frames'][frame-1]['f'])
+                    loudness_array.append(float(json_data['frames'][frame]['loudness']))
+                    frame_array.append(json_data['frames'][frame]['f'])
+                    loudness_slope = float(np.polyfit(frame_array,loudness_array,1)[-2])
+                    loudness_trend_down = True if loudness_slope < 0 else False
+                    #print(loudness_trend_down)
+
+                try:
+                    while not (rgb < rgb_threshold and trailing_rgb_trend_up is True and any(l < silence_threshold for l in loudness_array)):
+                        frame += 1
+                        #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
+                        last_frame_data = json_data['frames'][frame]
+                        #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        rgb = last_frame_data['rgb']
+                        if frame <=totalFrames-3:
+                            trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                            trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                            trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                            trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                        else:
+                            trailing_rgb_trend_up = True
 
                         loudness = last_frame_data['loudness']
                         loudness_array = []
@@ -254,73 +290,36 @@ def getScenes(videoFile,tape_directory,json_filename, totalFrames, frameRate=30,
                         frame_array.append(json_data['frames'][frame]['f'])
                         loudness_slope = float(np.polyfit(frame_array,loudness_array,1)[-2])
                         loudness_trend_down = True if loudness_slope < 0 else False
-                        #print(loudness_trend_down)
-
+                        
+                        loudness = last_frame_data['loudness']
+                        progress_list = get_eta(start_time,frame,number_of_frames)
+                        progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)                            
+                        #bar()
+                except IndexError:
+                    #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
                     try:
-                        while not (rgb < rgb_threshold and trailing_rgb_trend_up is True and any(l < silence_threshold for l in loudness_array)):
-                            frame += 1
-                            #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                            last_frame_data = json_data['frames'][frame]
-                            #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                            rgb = last_frame_data['rgb']
-                            if frame <=totalFrames-3:
-                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
-                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
-                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
-                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
-                            else:
-                                trailing_rgb_trend_up = True
-
-                            loudness = last_frame_data['loudness']
-                            loudness_array = []
-                            frame_array = []
-                            if frame-4 >= 0:
-                                loudness_array.append(float(json_data['frames'][frame-4]['loudness']))
-                                frame_array.append(json_data['frames'][frame-4]['f'])
-                            if frame-3 >= 0:
-                                loudness_array.append(float(json_data['frames'][frame-3]['loudness']))
-                                frame_array.append(json_data['frames'][frame-3]['f'])
-                            if frame-2 >= 0:
-                                loudness_array.append(float(json_data['frames'][frame-2]['loudness']))
-                                frame_array.append(json_data['frames'][frame-2]['f'])
-                            if frame-1 >= 0:
-                                loudness_array.append(float(json_data['frames'][frame-1]['loudness']))
-                                frame_array.append(json_data['frames'][frame-1]['f'])
-                            loudness_array.append(float(json_data['frames'][frame]['loudness']))
-                            frame_array.append(json_data['frames'][frame]['f'])
-                            loudness_slope = float(np.polyfit(frame_array,loudness_array,1)[-2])
-                            loudness_trend_down = True if loudness_slope < 0 else False
-                            
-                            loudness = last_frame_data['loudness']
-                            progress_list = get_eta(start_time,frame,number_of_frames)
-                            progress(redirector.progress_widget,frame,batch_size,redirector.progress_label,progress_list,redirector.progress_var)                            
-                            bar()
+                        last_frame_data = json_data['frames'][frame-1]
+                        #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
+                        rgb = last_frame_data['rgb']
+                        if frame <=totalFrames-3:
+                            trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
+                            trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
+                            trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
+                            trailing_rgb_trend_up = True if trailing_slope > 0 else False
+                        else:
+                            trailing_rgb_trend_up = True
+                        loudness = last_frame_data['loudness']
+                        progress_list = get_eta(start_time,frame-1,number_of_frames)
+                        progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+                        #bar()
                     except IndexError:
-                        #print("FRAME NUMBER "+str(frame)+" SELECTED, RGB = "+str(rgb),end='\r')
-                        try:
-                            last_frame_data = json_data['frames'][frame-1]
-                            #rgb = scale_number(float(last_frame_data['rgb']),0,255,json_data['analysis']['min_rgb'],json_data['analysis']['max_rgb'])
-                            rgb = last_frame_data['rgb']
-                            if frame <=totalFrames-3:
-                                trailing_frame_array = [json_data['frames'][frame]['f'],json_data['frames'][frame+1]['f']]
-                                trailing_rgb_array = [json_data['frames'][frame-1]['rgb'],json_data['frames'][frame]['rgb']]
-                                trailing_slope = float(np.polyfit(trailing_frame_array,trailing_rgb_array,1)[-2])
-                                trailing_rgb_trend_up = True if trailing_slope > 0 else False
-                            else:
-                                trailing_rgb_trend_up = True
-                            loudness = last_frame_data['loudness']
-                            progress_list = get_eta(start_time,frame-1,number_of_frames)
-                            progress(redirector.progress_widget,frame-1,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                            bar()
-                        except IndexError:
-                            break
+                        break
 
-                scene_data = {'scene':scene_number,'start_frame':start_frame_data['f'],'start_time':start_frame_data['ts'],'end_frame':last_frame_data['f'],'end_time':last_frame_data['ts']}
-                #print(scene_data)
-                scene_list.append(scene_data)
+            scene_data = {'scene':scene_number,'start_frame':start_frame_data['f'],'start_time':start_frame_data['ts'],'end_frame':last_frame_data['f'],'end_time':last_frame_data['ts']}
+            #print(scene_data)
+            scene_list.append(scene_data)
     print(str(scene_number)+" SCENES DETECTED")
     return scene_list
-
 
 def processTempFile(file, horizontalResolution, verticalResolution, aspectRatio, videoCodec, videoCodecPreset, crfValue, audioCodec):
     fileSplit = file.split('.')
@@ -405,24 +404,24 @@ def processVideo(videoFile=None, path=os.getcwd(),redirector=None):
         redirector.progress_widget['maximum'] = math.ceil(len(scene_list))
     batch_size = 1  # Adjust the batch size as needed
     start_time = time.time()
-    with alive_bar(int(len(scene_list)), force_tty=False) as bar2:
-        s = 0
-        for scene in scene_list:
-            startFrame = scene['start_frame']
-            endFrame = scene['end_frame']
-            #print("[ACTION] Exporting scene files to "+str(os.path.join(outputPath,tape_name+"_"+str(startFrame)+"-"+str(endFrame)+"."+filename_split[1])),end='\r')
-            #print('ENCODING SCENE',scene['scene'],end=': ')
-            sceneDuration = (int(endFrame) - int(startFrame)) / frameRate
-            #print('Duration',convert(sceneDuration),end='\t\r')
-            if not os.path.exists(outputPath):
-                os.makedirs(outputPath)
-            saveSplitScene(scene['scene'], videoFile, outputPath, scene['start_frame'], scene['end_frame'], frameRate)
-            '''for i in range(int(startFrame),int(endFrame)):
-                bar2()'''
-            progress_list = get_eta(start_time,s,len(scene_list))
-            progress(redirector.progress_widget,s,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-            bar2()
-            s += 1
+    #with alive_bar(int(len(scene_list)), force_tty=False) as bar2:
+    s = 0
+    for scene in scene_list:
+        startFrame = scene['start_frame']
+        endFrame = scene['end_frame']
+        #print("[ACTION] Exporting scene files to "+str(os.path.join(outputPath,tape_name+"_"+str(startFrame)+"-"+str(endFrame)+"."+filename_split[1])),end='\r')
+        #print('ENCODING SCENE',scene['scene'],end=': ')
+        sceneDuration = (int(endFrame) - int(startFrame)) / frameRate
+        #print('Duration',convert(sceneDuration),end='\t\r')
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        saveSplitScene(scene['scene'], videoFile, outputPath, scene['start_frame'], scene['end_frame'], frameRate)
+        '''for i in range(int(startFrame),int(endFrame)):
+            bar2()'''
+        progress_list = get_eta(start_time,s,len(scene_list))
+        progress(redirector.progress_widget,s,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+        #bar2()
+        s += 1
         '''for r in range(int(endFrame), int(totalFrames)):
             bar2()'''
     print("[ACTION] Scene Split Processing Complete")

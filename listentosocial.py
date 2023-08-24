@@ -32,9 +32,9 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
-temp_directory = config['social']['temp directory']
-video_directory = config['social']['video directory']
-vhs_json_file = config['social']['json file']
+temp_directory = config['directories']['temp directory']
+video_directory = config['directories']['video directory']
+vhs_json_file = config['directories']['json file']
 
 def runInParallel(*fns):
   proc = []

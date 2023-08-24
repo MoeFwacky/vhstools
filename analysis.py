@@ -1,7 +1,7 @@
 import configparser
 import cv2
 import datetime
-import enchant
+#import enchant
 import io
 import json
 import moviepy.editor as mp
@@ -20,19 +20,20 @@ import time
 import tkinter as tk
 import torch
 import torchvision.transforms as transforms
+import tqdm
 import traceback
 import urllib.request
-from alive_progress import alive_bar
+#from alive_progress import alive_bar
 from difflib import SequenceMatcher
 from google.cloud import vision
 from moviepy.editor import AudioFileClip
 from nltk.corpus import words
 from openai.error import RateLimitError
 from skimage.metrics import structural_similarity as ssim
-from spellchecker import SpellChecker
+#from spellchecker import SpellChecker
 from tkinter import ttk
 from torch import hub
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor #Wav2Vec2Tokenizer 
+#from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor #Wav2Vec2Tokenizer 
 
 scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
@@ -55,7 +56,7 @@ pytesseract.pytesseract.tesseract_cmd = config['analysis']['tesseract executable
 tesseract_config = f"--psm 3 -l eng"  # Set language to English
 ocr_confidence = float(config['analysis']['tesseract confidence'])
 
-spell = SpellChecker()
+#spell = SpellChecker()
 
 def enhance_edges(image):
     # Convert to grayscale
@@ -151,75 +152,72 @@ def detect_text_in_video(video_path, frames, x, y, similarity_threshold,client,r
     prev_frame = None  # Store the previous frame
     prev_f = -50
     count = 0
-    spell_checker = SpellChecker()
+    #spell_checker = SpellChecker()
     batch_size = 1
     start_time = time.time()
     p = 0
-    with alive_bar(frame_count, force_tty=False) as bar:
-        for f, frame in enumerate(frames):
-            if f <= 5:
-                if redirector != None:
-                    p+=1
-                    progress_list = get_eta(start_time,p,frame_count)
-                    progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                bar()
-                continue
-            if prev_frame is not None:
-                if is_frame_similar(frame, prev_frame, similarity_threshold) or prev_f > f-25:
-                    # Skip text detection if the frame is similar to the previous frame
-                    if redirector != None:
-                        p+=1
-                        progress_list = get_eta(start_time,p,frame_count)
-                        progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                    bar()
-                    continue
-            detected_text = perform_local_text_detection(frame)
-            if detected_text:
-                #print("Text Detected!")
-                prev_f = f
-                
-                # Convert frame to bytes
-                _, frame_bytes = cv2.imencode('.jpg', frame)
-                frame_image = vision.Image(content=frame_bytes.tobytes())
-
-                logo_set = set(logo_descriptions)
-                logo_data = set(logo_detection(client, frame_image, is_vision_image=True))
-                count += 1
-                logo_descriptions = list(logo_set.union(logo_data))
-
-                response = client.text_detection(image=frame_image)
-                count += 1
-                frame_text_data = response.text_annotations
-                if response.error.message:
-                    raise Exception(
-                        '{}\nFor more info on error messages, check: '
-                        'https://cloud.google.com/apis/design/errors'.format(
-                            response.error.message))
-                elif frame_text_data != []:
-                    frame_text = frame_text_data[0].description.replace('\n',' ').strip()
-                    frame_text = re.sub(r'[^\w\s\d!"#$%&\'()*+,\-./:;<=>?@[\\]^_`{|}~]', '', frame_text)
-                    text_width, text_height = cv2.getTextSize(frame_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
-
-                    if frame_text != '':
-                        frame_words = frame_text.split()
-                        real_frame_words = [word for word in frame_words if word.lower() in set(words.words()) or word.isdigit()]
-                        if real_frame_words and len(real_frame_words) > 3:
-                            filtered_text = ' '.join(real_frame_words)
-                            # Check similarity with previous texts
-                            similarity_found = any(similarity_ratio(filtered_text, prev_text) >= 0.90 for prev_text in prev_texts)
-                            if not similarity_found and len(frames) > 1 and len(filtered_text) > 3:
-                                text.append(filtered_text.strip())
-                                prev_texts.append(filtered_text.strip())
-                                print("[TEXT]: " + filtered_text)
-            bar()
+    #with alive_bar(frame_count, force_tty=False) as bar:
+    for f, frame in enumerate(frames):
+        if f <= 5:
             if redirector != None:
                 p+=1
                 progress_list = get_eta(start_time,p,frame_count)
                 progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-            prev_frame = frame  # Update the previous frame
+            #bar()
+            continue
+        if prev_frame is not None:
+            if is_frame_similar(frame, prev_frame, similarity_threshold) or prev_f > f-25:
+                # Skip text detection if the frame is similar to the previous frame
+                if redirector != None:
+                    p+=1
+                    progress_list = get_eta(start_time,p,frame_count)
+                    progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+                #bar()
+                continue
+        detected_text = perform_local_text_detection(frame)
+        if detected_text:
+            #print("Text Detected!")
+            prev_f = f
+            
+            # Convert frame to bytes
+            _, frame_bytes = cv2.imencode('.jpg', frame)
+            frame_image = vision.Image(content=frame_bytes.tobytes())
+
+            logo_set = set(logo_descriptions)
+            logo_data = set(logo_detection(client, frame_image, is_vision_image=True))
+            count += 1
+            logo_descriptions = list(logo_set.union(logo_data))
+
+            response = client.text_detection(image=frame_image)
+            count += 1
+            frame_text_data = response.text_annotations
+            if response.error.message:
+                raise Exception(
+                    '{}\nFor more info on error messages, check: '
+                    'https://cloud.google.com/apis/design/errors'.format(
+                        response.error.message))
+            elif frame_text_data != []:
+                frame_text = frame_text_data[0].description.replace('\n',' ').strip()
+                frame_text = re.sub(r'[^\w\s\d!"#$%&\'()*+,\-./:;<=>?@[\\]^_`{|}~]', '', frame_text)
+                text_width, text_height = cv2.getTextSize(frame_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
+
+                if frame_text != '':
+                    frame_words = frame_text.split()
+                    real_frame_words = [word for word in frame_words if word.lower() in set(words.words()) or word.isdigit()]
+                    if real_frame_words and len(real_frame_words) > 3:
+                        filtered_text = ' '.join(real_frame_words)
+                        # Check similarity with previous texts
+                        similarity_found = any(similarity_ratio(filtered_text, prev_text) >= 0.90 for prev_text in prev_texts)
+                        if not similarity_found and len(frames) > 1 and len(filtered_text) > 3:
+                            text.append(filtered_text.strip())
+                            prev_texts.append(filtered_text.strip())
+                            print("[TEXT]: " + filtered_text)
+        #bar()
         if redirector != None:
-            progress_list = get_eta(start_time,frame_count,frame_count)
-            progress(redirector.progress_widget,frame_count,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+            p+=1
+            progress_list = get_eta(start_time,p,frame_count)
+            progress(redirector.progress_widget,p,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+        prev_frame = frame  # Update the previous frame
         #video.release()
         #cv2.destroyAllWindows()
     print("[INFO] Detection Usage Count: "+str(count))
@@ -228,7 +226,7 @@ def detect_text_in_video(video_path, frames, x, y, similarity_threshold,client,r
 def similarity_ratio(a, b):
     return SequenceMatcher(None, a, b).ratio()
 
-def extract_audio_transcript(audio_file, language):
+'''def extract_audio_transcript(audio_file, language):
     model_name = "facebook/wav2vec2-base-960h"
     processor = Wav2Vec2Processor.from_pretrained(model_name, language=language)
     model = Wav2Vec2ForCTC.from_pretrained(model_name)
@@ -254,7 +252,7 @@ def extract_audio_transcript(audio_file, language):
     predicted_ids = torch.argmax(logits, dim=-1)
     transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
 
-    return transcription
+    return transcription'''
 
 def get_video_metadata(json_file, clip_filename, frame_rate=30):
     # Load the JSON data from the file
@@ -345,7 +343,10 @@ def get_eta(start_time,f,total_frames):
     else:
         time_elapsed = "{:02d}:{:02d}".format(round(elapsed_minutes), round(elapsed_seconds))    
     
-    frames_per_second = f / seconds_elapsed
+    try:
+        frames_per_second = f / seconds_elapsed
+    except ZeroDivisionError:
+        frames_per_second = 0.001
     remaining_frames = total_frames - f
     
     if frames_per_second > 0:
@@ -473,47 +474,47 @@ def analyze_video(video_path,redirector):
         start_time = time.time()
         f = 0
         
-        with alive_bar(frame_count, force_tty=False) as bar:
-            while True:
-                progress_list = get_eta(start_time,f,frame_count)
-                progress(redirector.progress_widget,f,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
-                ret, frame = video.read()
-                if not ret:
-                    frame_diff = frame_count - len(frames)
-                    while frame_diff > 0:
-                        bar()
-                        frame_diff -= 1
-                    break
+        #with alive_bar(frame_count, force_tty=False) as bar:
+        while True:
+            progress_list = get_eta(start_time,f,frame_count)
+            progress(redirector.progress_widget,f,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
+            ret, frame = video.read()
+            if not ret:
+                frame_diff = frame_count - len(frames)
+                while frame_diff > 0:
+                    #bar()
+                    frame_diff -= 1
+                break
 
-                # Convert to grayscale
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                
-                # Apply Gaussian blur
-                blurred = cv2.GaussianBlur(gray, (0, 0), 1)
-                equalized = cv2.equalizeHist(blurred)
-                # Calculate the sharpening mask
-                mask = cv2.addWeighted(gray, 1 + 1.5, equalized, -1.5, 0)
-                # Convert mask to color image
-                mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-                sharpened = cv2.add(frame, mask)
-                # Perform histogram equalization
-                pil_frame = PIL.Image.fromarray(np.uint8(frame))
-                processed = transform(pil_frame)
-                
-                # Perform morphological operations (optional)
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                morphed = cv2.morphologyEx(equalized, cv2.MORPH_CLOSE, kernel)
+            # Convert to grayscale
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Apply Gaussian blur
+            blurred = cv2.GaussianBlur(gray, (0, 0), 1)
+            equalized = cv2.equalizeHist(blurred)
+            # Calculate the sharpening mask
+            mask = cv2.addWeighted(gray, 1 + 1.5, equalized, -1.5, 0)
+            # Convert mask to color image
+            mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+            sharpened = cv2.add(frame, mask)
+            # Perform histogram equalization
+            pil_frame = PIL.Image.fromarray(np.uint8(frame))
+            processed = transform(pil_frame)
+            
+            # Perform morphological operations (optional)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            morphed = cv2.morphologyEx(equalized, cv2.MORPH_CLOSE, kernel)
 
-                frames.append(frame)
-                gray_frames.append(gray)
-                blurred_frames.append(blurred)
-                #threshold_frames.append(threshold)
-                sharpened_frames.append(sharpened)
-                morphed_frames.append(morphed)
-                processed_frames.append(processed)
-                bar()
-                f += 1
-            video.release()
+            frames.append(frame)
+            gray_frames.append(gray)
+            blurred_frames.append(blurred)
+            #threshold_frames.append(threshold)
+            sharpened_frames.append(sharpened)
+            morphed_frames.append(morphed)
+            processed_frames.append(processed)
+            #bar()
+            f += 1
+        video.release()
         progress_list = get_eta(start_time,frame_count,frame_count)
         progress(redirector.progress_widget,frame_count,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
         #text = extract_text_from_video(blurred_frames, x_shape, y_shape)

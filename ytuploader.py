@@ -27,8 +27,8 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(os.path.join(scriptPath,'config.ini'))
 
-vhs_json_file = config['social']['json file']
-vhs_directory = config['social']['video directory']
+vhs_json_file = config['directories']['json file']
+vhs_directory = config['directories']['video directory']
 credentials_path = config['youtube']['credentials path']
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]

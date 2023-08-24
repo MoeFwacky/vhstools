@@ -9,15 +9,14 @@ import moviepy.editor as mp
 import numpy as np
 import os
 import queue
-import ray
 import statistics
 import sys
 import tempfile
 import time
 import tkinter as tk
-import tqdm
+#import tqdm
 import wave
-from alive_progress import alive_bar
+#from alive_progress import alive_bar
 from decimal import Decimal
 from imutils.video import FileVideoStream
 from imutils.video import FPS
@@ -33,7 +32,7 @@ scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(scriptPath + delimeter + 'config.ini')
 silence_threshold = int(config['scenesplitter']['silence threshold'])
-temp_directory = config['scenesplitter']['temp directory']
+temp_directory = config['directories']['temp directory']
 audio_divisor = int(config['scenesplitter']['audio divisor'])
 frame_queue = queue.Queue(100)
 
@@ -270,46 +269,46 @@ def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_lab
     batch_size = 84  # Adjust the batch size as needed
     start_time = time.time()
     print("[ACTION] Scanning Frames for Brightness Data")
-    with alive_bar(total_frames_with_progress, force_tty=False) as bar:
-        for f in range(total_frames_with_progress):
-            try:
-                frame = video.read()
-                avg_color_per_row = np.average(frame, axis=0)
-                avg_color = np.average(avg_color_per_row, axis=0)
-                b, g, r = avg_color
-                rgb = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
-                rgb_values.append(rgb)
+    #with alive_bar(total_frames_with_progress, force_tty=False) as bar:
+    for f in range(total_frames_with_progress):
+        try:
+            frame = video.read()
+            avg_color_per_row = np.average(frame, axis=0)
+            avg_color = np.average(avg_color_per_row, axis=0)
+            b, g, r = avg_color
+            rgb = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+            rgb_values.append(rgb)
 
-                loudness = audio_chunks[f].dBFS
-                loudness_values.append(loudness)
+            loudness = audio_chunks[f].dBFS
+            loudness_values.append(loudness)
 
-                frameData = {
-                    'f': f,
-                    'ts': str(datetime.timedelta(seconds=f / frameRate)),
-                    'rgb': round(rgb, 5),
-                    'r': round(r, 5),
-                    'g': round(g, 5),
-                    'b': round(b, 5),
-                    'loudness': loudness
-                }
-                file_data['frames'].append(frameData)
-                if video.Q.qsize() < 5:
-                    time.sleep(0.001)
-            except Exception as e:
-                print("ERROR:", e)
-                pass
+            frameData = {
+                'f': f,
+                'ts': str(datetime.timedelta(seconds=f / frameRate)),
+                'rgb': round(rgb, 5),
+                'r': round(r, 5),
+                'g': round(g, 5),
+                'b': round(b, 5),
+                'loudness': loudness
+            }
+            file_data['frames'].append(frameData)
+            if video.Q.qsize() < 5:
+                time.sleep(0.001)
+        except Exception as e:
+            print("ERROR:", e)
+            pass
 
-            frames_processed += 1
-            progress_list = get_eta(start_time,f,total_frames_with_progress)
-            progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
-            '''if progress_widget is not None and frames_processed % batch_size == 0:
-                progress_widget['value'] = frames_processed
-                progress_widget.update()'''
-            bar()
+        frames_processed += 1
         progress_list = get_eta(start_time,f,total_frames_with_progress)
-        # Update progress and output widgets for the remaining frames
         progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
-        video.stop()
+        '''if progress_widget is not None and frames_processed % batch_size == 0:
+            progress_widget['value'] = frames_processed
+            progress_widget.update()'''
+        #bar()
+    progress_list = get_eta(start_time,f,total_frames_with_progress)
+    # Update progress and output widgets for the remaining frames
+    progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
+    video.stop()
         
 
     return file_data, rgb_values, loudness_values
