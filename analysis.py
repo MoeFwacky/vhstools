@@ -38,7 +38,7 @@ from torch import hub
 scriptPath = os.path.realpath(os.path.dirname(__file__))
 config = configparser.ConfigParser()
 config.read(os.path.join(scriptPath,'config.ini'))
-json_file = config['analysis']['json file']
+json_file = config['directories']['json file']
 openai.api_key = config['analysis']['openai api key']
 
 nltk.download('words')
