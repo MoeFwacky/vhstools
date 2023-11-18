@@ -26,17 +26,13 @@ VHS Tools is a powerful and user-friendly application designed to simplify the p
 
 3. **Install FFmpeg for Windows:** FFmpeg is required for various video processing tasks.
 
-4. **Install Tesseract:** Install Tesseract, which supports optical character recognition tasks.
-
-5. **Obtain an OpenAI API Key:** Obtain an OpenAI API key to enable tasks like transcribing audio and video identification.
+4. **Obtain an OpenAI API Key:** Obtain an OpenAI API key to enable tasks like transcribing audio and video identification.
 
 6. **Secure Internet Archive Keys:** Access and generate the necessary keys from the Internet Archive to enable seamless upload and archiving of your digitized tapes and clips.
 
 7. **Acquire Google OAuth2 JSON with YouTube API Permissions:** Set up Google OAuth2 credentials with YouTube API permissions to authorize VHS Tools for uploading videos to your channel.
 
-8. **Authenticate User Account for the Google Vision API:** Authenticate Google Vision tools for text recognition, logo detection, and object detection using your Google Cloud account.
-
-9. **Configure Config File Fields:** Define the fields in the configuration file (config.ini) to manage various settings, ensuring no essential sections are left empty.
+8. **Configure Config File Fields:** Define the fields in the configuration file (config.ini) to manage various settings, ensuring no essential sections are left empty.
 
 ## Contributing
 
