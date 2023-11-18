@@ -17,6 +17,7 @@ import tkinter as tk
 #import tqdm
 import vlc
 import webbrowser
+from collections import defaultdict
 from tkinter import filedialog
 from tkinter import messagebox
 from tkinter import scrolledtext
@@ -70,6 +71,12 @@ class VideoPlayer(tk.Frame):
 
         self.after(100, self.update_progress)
 
+    def load_media(self, new_media_path):
+        # Load a new media source
+        new_media = self.instance.media_new(new_media_path)
+        self.player.set_media(new_media)
+        self.player.play()  # Start playing the new video
+
     def seek_to_position(self, event):
         # Get the position where the click occurred
         click_position = event.x / self.progress_bar.winfo_width()
@@ -87,6 +94,10 @@ class VideoPlayer(tk.Frame):
 
     def stop(self):
         self.player.stop()
+
+    def release(self):
+        self.player.stop()
+        self.player.release()
 
     def step_backward(self):
         fps = self.player.get_fps()  # Get the frames per second of the video
@@ -126,20 +137,20 @@ class VideoPlayer(tk.Frame):
         self.player.set_time(int((last_frame_index / frame_rate) * 1000))
         self.update_progress()
 
-    def go_forward_1_percent(self):
+    def go_forward_x_percent(self,x=1):
         duration_ms = self.player.get_length()
         step_ms = duration_ms // 100  # 1% of the video duration in milliseconds
         current_position_ms = self.player.get_time()
-        new_position_ms = current_position_ms + step_ms
+        new_position_ms = current_position_ms + round(step_ms*x)
         if new_position_ms <= duration_ms:
             self.player.set_time(new_position_ms)
         self.update_progress()
 
-    def go_backward_1_percent(self):
+    def go_backward_x_percent(self,x=1):
         duration_ms = self.player.get_length()
         step_ms = duration_ms // 100  # 1% of the video duration in milliseconds
         current_position_ms = self.player.get_time()
-        new_position_ms = current_position_ms - step_ms
+        new_position_ms = current_position_ms - round(step_ms*x)
         if new_position_ms >= 0:
             self.player.set_time(new_position_ms)
         self.update_progress()
@@ -162,12 +173,14 @@ class TextRedirector(io.TextIOBase):
         self.description_label = tk.Label(window, text="To begin, select an operation from the Operations Menu", font=("Helvetica", 12, "italic"))
         self.description_label.grid(row=1, column=0, columnspan=15, sticky=tk.W)
         
-        self.progress_label = tk.Label(window, text=" ")
-        self.progress_label.grid(row=8, column=11, columnspan=8, sticky=tk.W)
+        self.progress_label_var = tk.StringVar()
+        self.progress_label_var.set('')
+        self.progress_label = tk.Label(window, text='')
+        self.progress_label.grid(row=12, column=11, columnspan=8, sticky=tk.W)
         
         self.progress_var = tk.IntVar()
         self.progress_widget = ttk.Progressbar(window, variable=self.progress_var, orient=tk.HORIZONTAL, length=500, mode='determinate')
-        self.progress_widget.grid(row=8, column=0, columnspan=18, sticky=tk.SW)
+        self.progress_widget.grid(row=12, column=0, columnspan=18, sticky=tk.SW)
         
         self.label_label = tk.Label(window, text="File or Directory:", font=("TkDefaultFont", 10, "bold"))
         self.label_label.grid(row=2, column=0, columnspan=2, sticky=tk.W)
@@ -188,7 +201,7 @@ class TextRedirector(io.TextIOBase):
         self.json_file_entry.grid(row=3, column=2, columnspan=5, sticky=tk.W)
 
         self.action_label = tk.Label(window, text="", font=("TkDefaultFont", 12, "bold"))
-        self.action_label.grid(row=7, column=0, columnspan=20)
+        self.action_label.grid(row=11, column=0, columnspan=20)
 
     def write(self, s):
         # Remove excess lines if necessary
@@ -487,7 +500,7 @@ def launch_audio_normalizer(file=None,directory=None,redirector=None):
         messagebox.showinfo("Audio Normalization Complete", f"Audio Normalized in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
     else: 
         print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
-def launch_identifier(file=None,directory=None,redirector=None):
+def launch_identifier(file=None,directory=None,redirector=None,window=None):
     print("██ ██████  ███████ ███    ██ ████████ ██ ███████ ██ ███████ ██████ ")
     print("██ ██   ██ ██      ████   ██    ██    ██ ██      ██ ██      ██   ██")
     print("██ ██   ██ █████   ██ ██  ██    ██    ██ █████   ██ █████   ██████ ")
@@ -500,9 +513,9 @@ def launch_identifier(file=None,directory=None,redirector=None):
     if redirector.progress_label != None:
         redirector.progress_label.config(text="")
     import analysis
+    video_player = None
     if file != None:
-        analysis.analyze_video(file,redirector)
-        #redirector.progress_widget.destroy() if redirector.progress_widget is not None else None
+        analysis.analyze_video(file,redirector,window)
     elif directory != None:
         dirContents = os.scandir(directory)
         dirList = []
@@ -511,7 +524,8 @@ def launch_identifier(file=None,directory=None,redirector=None):
         for i, entry in enumerate(dirContents):
             if entry.name[-3:] in extensions:
                 print(entry.name)
-                analysis.analyze_video(os.path.join(directory, entry.name),redirector)
+                file = os.path.join(directory, entry.name)
+                analysis.analyze_video(os.path.join(directory, entry.name),redirector,window)
     else:
         dirContents = os.scandir(os.getcwd())
         dirList = []
@@ -548,9 +562,9 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
         if file != None:
             print("[ACTION] UPLOADING "+file+" to the Internet Archive")
             if args.video == True or is_video == True:
-                iauploader.uploadToArchive([file])
+                status = iauploader.uploadToArchive([file])
             elif args.clip == True or is_clip == True:
-                iauploader.uploadClipToArchive(file,clip_json_file)
+                status = iauploader.uploadClipToArchive(file,clip_json_file)
         elif directory != None:
             dirContents = os.scandir(directory)
             videos = []
@@ -559,14 +573,14 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
                 if entry.name[-3:] in extensions:
                     print("[ACTION] UPLOADING "+entry.name+" to the Internet Archive")
                     if args.video == True or is_video == True:
-                        iauploader.uploadToArchive([entry.name])
+                        status = iauploader.uploadToArchive([entry.name])
                     elif args.clip == True or is_clip == True:
-                        iauploader.uploadClipToArchive(os.path.join(directory,entry.name),clip_json_file)
+                        status = iauploader.uploadClipToArchive(os.path.join(directory,entry.name),clip_json_file)
         else:
             if args.video == True or is_video == True:
-                iauploader.uploadToArchive(None)
+                status = iauploader.uploadToArchive(None)
             elif args.clip == True or is_clip == True:
-                iauploader.uploadClipToArchive(None)
+                status = iauploader.uploadClipToArchive(None)
     else:
         print("[ERROR] Video Type not Specified")
     ending_time = datetime.datetime.now()
@@ -576,13 +590,21 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
     time_minutes = (total_seconds % 3600) // 60
     time_seconds = total_seconds % 60
     if redirector != None:
-        redirector.action_label.config(text="")
-        if time_hours < 1:
-            redirector.progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
-            messagebox.showerror("Archive Complete", f"Internet Archive Upload Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
+        if status == None:
+            redirector.action_label.config(text="")
+            global clip_editor
+            global current_index
+            with open(clip_json_file, "r") as clip_data:
+                clip_data = json.load(clip_data) 
+            show_clip_details(clip_data[current_index], clip_data, current_index, os.path.dirname(clip_json_file))
+            if time_hours < 1:
+                redirector.progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+                messagebox.showerror("Archive Complete", f"Internet Archive Upload Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
+            else:
+                redirector.progress_label.config(text=f"Complete in {int(time_hours):d} hours, {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+                messagebox.showerror("Archive Complete", f"Internet Archive Upload Complete in {int(time_hours):d} hours, {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
         else:
-            redirector.progress_label.config(text=f"Complete in {int(time_hours):d} hours, {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
-            messagebox.showerror("Archive Complete", f"Internet Archive Upload Complete in {int(time_hours):d} hours, {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
+            messagebox.showerror("ERROR: "+status[0],status[1])
     else: 
         if time_hours < 1:
             print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
@@ -635,6 +657,11 @@ def launch_youtuber(file=None,directory=None,redirector=None,is_video=False,is_c
     if redirector != None:
         if status == None:
             redirector.action_label.config(text="")
+            global clip_editor
+            global current_index
+            with open(clip_json_file, "r") as clip_data:
+                clip_data = json.load(clip_data) 
+            show_clip_details(clip_data[current_index], clip_data, current_index, os.path.dirname(clip_json_file))
             if time_hours < 1:
                 redirector.progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
                 messagebox.showinfo("Upload Complete", f"YouTube Upload Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
@@ -1011,7 +1038,176 @@ def show_about_dialog():
     button = tk.Button(about_window, text="Visit Repository", command=lambda: webbrowser.open('https://github.com/MoeFwacky/videotools'))
     button.pack(side="right",pady=5)
 
-def launch_script(selected_script,output_text,redirector):
+def update_timecode(video_player,timecode,gui_window,frame_offset=0):
+    current_ms = video_player.player.get_time()
+    total_ms = video_player.player.get_length()
+    frame_rate = video_player.player.get_fps()
+
+    current_hours, remaining_minutes = divmod(current_ms // 1000, 3600)
+    current_minutes, current_seconds = divmod(remaining_minutes, 60)
+
+    total_hours, total_remaining_minutes = divmod(total_ms // 1000, 3600)
+    total_minutes, total_seconds = divmod(total_remaining_minutes, 60)
+
+    current_frame = str(int(current_ms / 1000 * frame_rate)+frame_offset)
+    total_frames = str(int(total_ms / 1000 * frame_rate)+frame_offset)
+
+    if int(total_hours) > 0:
+        timecode_string = (
+            f"{current_frame}/{total_frames} | "
+            f"{current_hours:02d}:{current_minutes:02d}:{current_seconds:02d}/"
+            f"{total_hours:02d}:{total_minutes:02d}:{total_seconds:02d}"
+        )
+    else:
+        timecode_string = (
+            f"{current_frame}/{total_frames} | "
+            f"{current_minutes:02d}:{current_seconds:02d}/"
+            f"{total_minutes:02d}:{total_seconds:02d}"
+        )
+    timecode.set(timecode_string)
+    gui_window.after(33, lambda: update_timecode(video_player,timecode,gui_window,frame_offset))
+    return current_ms,current_frame
+
+def show_video_player(window_object,file_path,item,frame_offset=0):
+    global start_frame_var
+    global end_frame_var
+    video_player = VideoPlayer(window_object, media_path=file_path)
+    # Update the entry widgets with current item values and populate the clip_widget_mapping list
+    volume_frame = tk.Frame(window_object)
+    
+    # Add a volume bar
+    volume_scale = ttk.Scale(volume_frame, from_=100, to=0, orient=tk.VERTICAL, length=250, command=lambda v: video_player.player.audio_set_volume(round((float(v)))))
+    #volume_scale.set(75)  # Set initial volume to 50
+    volume_scale.grid(row=0, column=0)
+
+    # Add a mute button
+    mute_button = ttk.Button(volume_frame, text="Mute", command=lambda: video_player.player.audio_set_mute(not video_player.player.audio_get_mute()))
+    mute_button.grid(row=1, column=0, padx=5, sticky="nsew")
+
+    control_frame = ttk.Frame(window_object)
+    
+
+    # Buttons to step back x%
+    extra_jump_back_button = ttk.Button(control_frame, text="<<<", command=lambda: video_player.go_backward_x_percent(x=5))
+    extra_jump_back_button.grid(row=0, column=0, sticky="nsew")
+    
+    jump_back_button = ttk.Button(control_frame, text="<<", command=lambda: video_player.go_backward_x_percent(x=0.5))
+    jump_back_button.grid(row=0, column=1, sticky="nsew")
+    
+    # Add buttons for step backward and step forward
+    step_backward_button = ttk.Button(control_frame, text="<", command=video_player.step_backward)
+    step_backward_button.grid(row=0, column=2, sticky="nsew")
+
+    pause_button = ttk.Button(control_frame, text="►/‖", command=video_player.pause)
+    pause_button.grid(row=0, column=3, sticky="nsew")
+
+    step_forward_button = ttk.Button(control_frame, text=">", command=video_player.step_forward)
+    step_forward_button.grid(row=0, column=4, sticky="nsew")
+
+    # Buttons to step forward x%
+    jump_forward_button = ttk.Button(control_frame, text=">>", command=lambda: video_player.go_forward_x_percent(x=0.5))
+    jump_forward_button.grid(row=0, column=5, sticky="nsew")
+
+    extra_jump_forward_button = ttk.Button(control_frame, text=">>>", command=lambda: video_player.go_forward_x_percent(x=5))
+    extra_jump_forward_button.grid(row=0, column=6, sticky="nsew")
+    
+    timecode = tk.StringVar()
+    timecode.set('TIMECODE')
+    time_label = tk.Label(window_object,textvariable=timecode,font=("Lucida Console", 12, "normal"))
+    current_frame,current_ms = update_timecode(video_player,timecode,window_object,frame_offset)
+
+    # Entry widgets to show the start and end frames
+    start_frame_var = tk.StringVar()
+    start_ms_var = tk.StringVar()
+    start_frame_entry = ttk.Entry(control_frame, textvariable=start_frame_var, width=8)
+    start_frame_entry.grid(row=1, column=2, padx=5, pady=5)
+
+    end_frame_var = tk.StringVar()
+    end_ms_var = tk.StringVar()
+    end_frame_entry = ttk.Entry(control_frame, textvariable=end_frame_var, width=8)
+    end_frame_entry.grid(row=1, column=3, padx=5, pady=5)
+
+    def set_current_frame(frame_offset,video_player,start=True):
+        current_ms = video_player.player.get_time()
+        frame_rate = video_player.player.get_fps()
+        current_frame = str(int(current_ms / 1000 * frame_rate)+frame_offset)
+        if start is True:
+            start_frame_var.set(current_frame)
+            start_ms_var.set(current_ms)
+            start_frame_entry.update()
+        else:
+            end_frame_var.set(current_frame)
+            end_ms_var.set(current_ms)
+            end_frame_entry.update
+
+    def set_start_end(frame_offset,video_player,start=True):
+        total_ms = video_player.player.get_length()
+        frame_rate = video_player.player.get_fps()
+        total_frames = str(int(total_ms / 1000 * frame_rate)+frame_offset)
+        if start is True:
+            start_frame_var.set(frame_offset)
+            start_frame_entry.update()
+        else:
+            end_frame_var.set(total_frames)
+            end_frame_entry.update
+
+    # Buttons to get the current frame and update start and end frame entry widgets
+
+    set_first_frame_button = ttk.Button(control_frame, text="First In",command=lambda: set_start_end(frame_offset,video_player,start=True))
+    set_first_frame_button.grid(row=1, column=0, padx=5, pady=5)
+
+    set_start_frame_button = ttk.Button(control_frame, text="Current In",command=lambda: set_current_frame(frame_offset,video_player,start=True))
+    set_start_frame_button.grid(row=1, column=1, padx=5, pady=5)
+    
+    set_end_frame_button = ttk.Button(control_frame, text="Current Out",command=lambda: set_current_frame(frame_offset,video_player,start=False))
+    set_end_frame_button.grid(row=1, column=4, padx=5, pady=5)    
+
+    set_last_frame_button = ttk.Button(control_frame, text="Last Out",command=lambda: set_start_end(frame_offset,video_player,start=False))
+    set_last_frame_button.grid(row=1, column=5, padx=5, pady=5)
+
+    # Button to initiate the new_video_clip function
+    def create_new_clip():
+        new_clip_data={}
+        new_clip_data['source_file'] = file_path
+        new_clip_data['tape_id'] = item.get("Tape ID", "")
+        if new_clip_data['tape_id'] == "":
+            new_clip_data['tape_id'] = item.get("Tape_ID", "")
+        new_clip_data['start_frame'] = int(start_frame_var.get())
+        new_clip_data['end_frame'] = int(end_frame_var.get())
+
+        # Calculate start_ms and end_ms based on frame numbers and frame rate
+        frame_rate = video_player.player.get_fps()
+        new_clip_data['start_ms'] = int(new_clip_data['start_frame'] / frame_rate * 1000)
+        new_clip_data['end_ms'] = int(new_clip_data['end_frame'] / frame_rate * 1000)
+
+        # Validate start_ms and end_ms
+        if new_clip_data['start_ms'] < new_clip_data['end_ms']:
+            new_video_clip(new_clip_data)
+        else:
+            error_message="Start Frame ["+str(new_clip_data['start_frame'])+"] is higher than End Frame ["+str(new_clip_data['end_frame'])+"]"
+            messagebox.showinfo("ERROR!", error_message,icon=messagebox.ERROR)
+
+    create_new_clip_button = ttk.Button(control_frame, text="New Clip",
+                                        command=create_new_clip)
+    create_new_clip_button.grid(row=1, column=6, padx=5, pady=5)
+
+    return video_player,volume_frame,control_frame,time_label
+
+def new_video_clip(new_clip_data):
+    file_extension = os.path.basename(new_clip_data['source_file']).split('.')[1]
+    base_file = os.path.join(os.path.dirname(json_file),new_clip_data['tape_id']+'.'+file_extension)
+    output_name = new_clip_data['tape_id']+'_'+str(new_clip_data['start_frame'])+'-'+str(new_clip_data['end_frame'])+'.'+file_extension
+    output_path = os.path.join(os.path.dirname(json_file),new_clip_data['tape_id'])
+    import editor
+    try:
+        editor.splitVideo(base_file,new_clip_data['start_ms']/1000,new_clip_data['end_ms']/1000,output_name,output_path)
+    except Exception as e:
+        print(e)
+        return
+    completion_message = f"{output_name} created in {output_path}"
+    messagebox.showinfo("Clip Creation Complete", completion_message,icon=messagebox.INFO)
+
+def launch_script(selected_script,output_text,redirector,window=None):
     print("Launching "+selected_script)
     # Get the selected filename or directory
     global thread
@@ -1063,7 +1259,7 @@ def launch_script(selected_script,output_text,redirector):
             print(e)
     elif selected_script == "Identifier":
         try:
-            thread = threading.Thread(target=launch_identifier,args=(selected_filename,selected_directory,redirector))
+            thread = threading.Thread(target=launch_identifier,args=(selected_filename,selected_directory,redirector,window))
             thread.start()
         except Exception as e:
             print(e)
@@ -1394,6 +1590,56 @@ else:
         if current_index < len(data) - 1:
             current_index += 1  # Increment the index to move to the next item
             show_clip_details(data[current_index], data, current_index, data_dir)
+
+    def on_youtube_upload_button_press(option,filename,data_dir,redirector,clip_data_path,data,upload_to_youtube_button,video_player):
+        #if "ytuploader" not in sys.modules:
+        video_player.stop()
+        redirector.progress_label_var.set("Uploading Video to YouTube")
+        upload_to_youtube_button.config(textvariable=redirector.progress_label_var,state="disabled")
+        #import ytuploader
+        if 'youtube' not in ytuploader.__dict__:
+            ytuploader.youtube = ytuploader.get_authenticated_youtube_service(config['youtube']['credentials path'])
+        global clip_editor
+        global current_index
+        '''try:
+            if ytuploader.youtube:
+                pass
+        except NameError:
+            ytuploader.youtube = ytuploader.get_authenticated_youtube_service(config['youtube']['credentials path'])'''
+        
+        #upload_to_youtube_label = tk.Label(clip_editor, textvariable=redirector.progress_label_var)
+        #upload_to_youtube_label.grid(row=i-1, column=1, columnspan=3, padx=10, pady=1, sticky="w")
+        if option == "Full Video":
+            pass
+        else:
+            disclaimer_text = "By continuing you certify that the content you are uploading complies with the YouTube Terms of Service (including the YouTube Community Guidelines) at https://www.youtube.com/t/terms. Please be sure not to violate others' copyright or privacy rights."
+            response = messagebox.askokcancel("Disclaimer", disclaimer_text)
+            if response:
+                try:
+                    thread = threading.Thread(target=launch_youtuber, args=(os.path.join(data_dir,filename), data_dir, redirector, False, True, clip_data_path))  # Pass the variables here
+
+                    thread.start()
+                except Exception as e:
+                    print(e)
+            else:
+                return
+
+    def on_archive_upload_button_press(option,filename,data_dir,redirector,clip_data_path,data,upload_to_archive_button,video_player):
+        video_player.stop()
+        redirector.progress_label_var.set("Uploading Video to the Internet Archive")
+        upload_to_archive_button.config(textvariable=redirector.progress_label_var,state="disabled")
+        
+        if option == "Full Video":
+            pass
+        else:
+            try:
+                thread = threading.Thread(target=launch_archiver, args=(os.path.join(data_dir,filename), data_dir, redirector, False, True, clip_data_path))
+                
+                thread.start()
+            except Exception as e:
+                print(e)
+            else:
+                return
         
     def show_clip_details(item, data, index, data_dir):
         # Update the current index
@@ -1407,7 +1653,7 @@ else:
             clip_editor = tk.Toplevel()
             clip_editor.title("Clip Data Editor")
             clip_editor.iconbitmap(tv_ico)
-            clip_editor.geometry("666x966")
+            clip_editor.geometry("966x1080")
             launchloop = True
 
             # Bind the window close event to set `clip_editor` to None
@@ -1430,12 +1676,14 @@ else:
         entry_widgets = []
         text_widgets = []
         clip_widget_mapping = []
-        keys = ["Tape ID", "Frame Range", "Title", "Description", "Air Date", "Network/Station", "Location", "Tags", "Filename", "Length (seconds)"]
+        keys = ["Tape ID", "Frame Range", "Title", "Description", "Air Date", "Network/Station", "Location", "Tags", "Filename", "Length (seconds)", "Uploaded"]
 
         try:
             for i, key in enumerate(keys):
-                label = tk.Label(clip_editor, text=key)
-                label.grid(row=i, column=0, padx=10, sticky="e")
+                
+                if key != "Uploaded":
+                    label = tk.Label(clip_editor, text=key)
+                    label.grid(row=i, column=0, padx=10, sticky="e")
 
                 value = tk.StringVar(value=item[key])
                 if (key == "Length (seconds)" or key == "Tape ID"):
@@ -1458,11 +1706,11 @@ else:
                     end_frame_var = tk.StringVar(value=frame_range[1])
                     frame = tk.Frame(clip_editor)
                     frame.grid(row=i, column=1, sticky="w")
-                    entry_a = tk.Entry(frame, textvariable=start_frame_var, width=10, state="normal")
+                    entry_a = tk.Entry(frame, textvariable=start_frame_var, width=10, state="disabled")
                     entry_a.grid(row=0, column=0, padx=10, sticky="w")
                     hyphen = tk.Label(frame, text=" - ")
                     hyphen.grid(row=0, column=1, padx=10, sticky="nsew")
-                    entry_b = tk.Entry(frame, textvariable=end_frame_var, width=10, state="normal")
+                    entry_b = tk.Entry(frame, textvariable=end_frame_var, width=10, state="disabled")
                     entry_b.grid(row=0, column=2, padx=10, pady=1, sticky="w")
 
                     entry_widgets.append(entry_a)  # Add the Entry widgets to the common list
@@ -1471,6 +1719,33 @@ else:
                     # Add both entry widgets with the "Frame Range" key to clip_widget_mapping
                     clip_widget_mapping.append((entry_a, key))
                     clip_widget_mapping.append((entry_b, key))
+                elif key == "Uploaded":
+                    label = tk.Label(clip_editor, text="YouTube")
+                    label.grid(row=i, column=0, padx=10, sticky="e")
+                    if "youtube" not in item[key]:
+                        upload_to_youtube_button = tk.Button(clip_editor, text="Upload Clip to YouTube", command=lambda: on_youtube_upload_button_press("Clip",item["Filename"],data_dir,redirector,clip_data_path,data,upload_to_youtube_button, video_player))
+                        upload_to_youtube_button.grid(row=i, column=1, columnspan=2, padx=10, pady=1, sticky="w")
+                    else:
+                        destination = "youtube"
+                        destination_value = tk.StringVar(value=item[key][destination]["url"])
+                        entry = tk.Entry(clip_editor, textvariable=destination_value, fg="blue", cursor="hand2", state="readonly")
+                        entry.grid(row=i, column=1, columnspan=2, padx=10, sticky="nsew")
+                        entry_widgets.append(entry)
+                        clip_widget_mapping.append((entry, destination))
+                    i +=1
+                    label = tk.Label(clip_editor, text="Internet Archive")
+                    label.grid(row=i, column=0, padx=10, sticky="e")
+                    if "internet archive" not in item[key]:
+                        upload_to_archive_button = tk.Button(clip_editor, text="Upload Clip to the Internet Archive", command=lambda: on_archive_upload_button_press("Clip",item["Filename"],data_dir,redirector,clip_data_path,data,upload_to_archive_button,video_player))
+                        upload_to_archive_button.grid(row=i, column=1, columnspan=2, padx=10, pady=1, sticky="w")                      
+                    else:
+                        destination = "internet archive"
+                        destination_value = tk.StringVar(value=item[key][destination]["url"])
+                        entry = tk.Entry(clip_editor, textvariable=destination_value, fg="blue", cursor="hand2", state="readonly")
+                        entry.grid(row=i, column=1, columnspan=2, padx=10, sticky="nsew")
+                        entry_widgets.append(entry)
+                        clip_widget_mapping.append((entry, destination))
+                    i +=1                        
                 else:
                     entry = tk.Entry(clip_editor, textvariable=value, width=60, state="normal")
                     entry.grid(row=i, column=1, columnspan=2, padx=10, sticky="nsew")
@@ -1479,21 +1754,29 @@ else:
                     clip_widget_mapping.append((entry, key))  # Store the mapping between widget object and key
 
         except KeyError as e:
-            print("KeyError: " + str(e))
+            if str(e) != "'Uploaded'":
+                print("KeyError: " + str(e))
+            else:
+                i+=2
+                upload_to_youtube_button = tk.Button(clip_editor, text="Upload Clip to YouTube", command=lambda: on_youtube_upload_button_press("Clip",item["Filename"],data_dir,redirector,clip_data_path,data,upload_to_youtube_button, video_player))
+                upload_to_youtube_button.grid(row=i-1, column=1, columnspan=2, padx=10, pady=1, sticky="w")
+
+                upload_to_archive_button = tk.Button(clip_editor, text="Upload Clip to the Internet Archive", command=lambda: on_archive_upload_button_press("Clip",item["Filename"],data_dir,redirector,clip_data_path,data,upload_to_archive_button,video_player))
+                upload_to_archive_button.grid(row=i, column=1, columnspan=2, padx=10, pady=1, sticky="w")
 
         # Adjust column widths to accommodate the widgets
         clip_editor.grid_columnconfigure(0, weight=1)
         clip_editor.grid_columnconfigure(1, weight=3)
 
         save_button = tk.Button(clip_editor, text="Save Changes to File", command=lambda: save_clip_data(item, data, clip_widget_mapping, clip_data_path, video_player, index))
-        save_button.grid(row=len(keys), column=0, columnspan=3, padx=30, pady=10, sticky="nsew")
+        save_button.grid(row=i+1, column=0, columnspan=3, padx=30, pady=10, sticky="nsew")
 
         # Create buttons to navigate back and forth
         prev_button = tk.Button(clip_editor, text="Previous Clip", command=lambda: to_previous_clip(current_index, data, data_dir, video_player))
-        prev_button.grid(row=len(keys)+1, column=0, padx=10, pady=10, sticky="nsew")
+        prev_button.grid(row=i+2, column=0, padx=10, pady=10, sticky="nsew")
 
         next_button = tk.Button(clip_editor, text="Next Clip", command=lambda: to_next_clip(current_index,data,data_dir,video_player))
-        next_button.grid(row=len(keys)+1, column=2, padx=10, pady=10, sticky="e")
+        next_button.grid(row=i+2, column=2, padx=10, pady=10, sticky="e")
 
         # Check if the current item is the first or last one
         is_first_item = index == 0
@@ -1538,7 +1821,7 @@ else:
 
         # Create a frame to hold the "New Clip Data" and "Delete Entry" buttons
         button_frame = tk.Frame(clip_editor)
-        button_frame.grid(row=len(keys) + 1, column=1, padx=10, pady=10)
+        button_frame.grid(row=i+2, column=1, padx=10, pady=10)
 
         # Create the "New Clip Data" button
         new_entry_button = tk.Button(button_frame, text="New Clip Entry", command=lambda: create_clip_entry(data, current_index, data_dir, video_player))
@@ -1548,10 +1831,10 @@ else:
         delete_button = tk.Button(button_frame, text="Delete Entry", command=delete_entry)
         delete_button.grid(row=0, column=1, padx=5, pady=5)
 
-        video_player.grid(row=len(keys)+3, column=1, columnspan=1, rowspan=3, padx=1, pady=1, sticky="nsew")
-        volume_frame.grid(row=len(keys) + 3, column=2)
+        video_player.grid(row=i+4, column=1, columnspan=1, rowspan=3, padx=1, pady=1, sticky="nsew")
+        volume_frame.grid(row=i+4, column=2)
         time_label.grid(row=len(keys)+7,column=1)
-        control_frame.grid(row=len(keys) + 8, column=0, columnspan=3, sticky=tk.S)
+        control_frame.grid(row=i+9, column=0, columnspan=3, sticky=tk.S)
         
         # Bind the window close event to set `clip_editor` to None
         #clip_editor.protocol("WM_DELETE_WINDOW", lambda: on_window_close(clip_editor,video_player))
@@ -1561,121 +1844,6 @@ else:
         if launchloop:
             clip_editor.mainloop()
 
-    def show_video_player(window_object,file_path,item,frame_offset=0):
-        global start_frame_var
-        global end_frame_var
-        video_player = VideoPlayer(window_object, media_path=file_path)
-        # Update the entry widgets with current item values and populate the clip_widget_mapping list
-        volume_frame = tk.Frame(window_object)
-        
-        # Add a volume bar
-        volume_scale = ttk.Scale(volume_frame, from_=100, to=0, orient=tk.VERTICAL, length=250, command=lambda v: video_player.player.audio_set_volume(round((float(v)))))
-        volume_scale.set(50)  # Set initial volume to 50
-        volume_scale.grid(row=0, column=0)
-
-        # Add a mute button
-        mute_button = ttk.Button(volume_frame, text="Mute", command=lambda: video_player.player.audio_set_mute(not video_player.player.audio_get_mute()))
-        mute_button.grid(row=1, column=0, padx=5, sticky="nsew")
-
-        control_frame = ttk.Frame(window_object)
-        
-
-        # Button to step back 1%
-        first_frame_button = ttk.Button(control_frame, text="<<", command=video_player.go_backward_1_percent)
-        first_frame_button.grid(row=0, column=0, sticky="nsew")
-        
-        # Add buttons for step backward and step forward
-        step_backward_button = ttk.Button(control_frame, text="<", command=video_player.step_backward)
-        step_backward_button.grid(row=0, column=1, sticky="nsew")
-
-        pause_button = ttk.Button(control_frame, text="Play/Pause", command=video_player.pause)
-        pause_button.grid(row=0, column=2, sticky="nsew")
-
-        step_forward_button = ttk.Button(control_frame, text=">", command=video_player.step_forward)
-        step_forward_button.grid(row=0, column=3, sticky="nsew")
-
-        # Button to navigate to the last frame
-        last_frame_button = ttk.Button(control_frame, text=">>", command=video_player.go_forward_1_percent)
-        last_frame_button.grid(row=0, column=4, sticky="nsew")
-        
-        timecode = tk.StringVar()
-        timecode.set('TIMECODE')
-        time_label = tk.Label(window_object,textvariable=timecode,font=("Lucida Console", 12, "normal"))
-        current_frame,current_ms = update_timecode(video_player,timecode,window_object,frame_offset)
-
-        # Entry widgets to show the start and end frames
-        start_frame_var = tk.StringVar()
-        start_ms_var = tk.StringVar()
-        start_frame_entry = ttk.Entry(control_frame, textvariable=start_frame_var, width=8)
-        start_frame_entry.grid(row=1, column=1, padx=5, pady=5)
-
-        end_frame_var = tk.StringVar()
-        end_ms_var = tk.StringVar()
-        end_frame_entry = ttk.Entry(control_frame, textvariable=end_frame_var, width=8)
-        end_frame_entry.grid(row=1, column=2, padx=5, pady=5)
-
-        def set_current_frame(frame_offset,video_player,start=True):
-            current_ms = video_player.player.get_time()
-            frame_rate = video_player.player.get_fps()
-            current_frame = str(int(current_ms / 1000 * frame_rate)+frame_offset)
-            if start is True:
-                start_frame_var.set(current_frame)
-                start_ms_var.set(current_ms)
-                start_frame_entry.update()
-            else:
-                end_frame_var.set(current_frame)
-                end_ms_var.set(current_ms)
-                end_frame_entry.update
-
-        # Buttons to get the current frame and update start and end frame entry widgets
-        set_start_frame_button = ttk.Button(control_frame, text="Start Frame",command=lambda: set_current_frame(frame_offset,video_player,start=True))
-        set_start_frame_button.grid(row=1, column=0, padx=5, pady=5)
-        
-        set_end_frame_button = ttk.Button(control_frame, text="End Frame",command=lambda: set_current_frame(frame_offset,video_player,start=False))
-        set_end_frame_button.grid(row=1, column=3, padx=5, pady=5)
-
-        # Button to initiate the new_video_clip function
-        def create_new_clip():
-            new_clip_data={}
-            new_clip_data['source_file'] = file_path
-            new_clip_data['tape_id'] = item.get("Tape ID", "")
-            if new_clip_data['tape_id'] == "":
-                new_clip_data['tape_id'] = item.get("Tape_ID", "")
-            new_clip_data['start_frame'] = int(start_frame_var.get())
-            new_clip_data['end_frame'] = int(end_frame_var.get())
-
-            # Calculate start_ms and end_ms based on frame numbers and frame rate
-            frame_rate = video_player.player.get_fps()
-            new_clip_data['start_ms'] = int(new_clip_data['start_frame'] / frame_rate * 1000)
-            new_clip_data['end_ms'] = int(new_clip_data['end_frame'] / frame_rate * 1000)
-
-            # Validate start_ms and end_ms
-            if new_clip_data['start_ms'] < new_clip_data['end_ms']:
-                new_video_clip(new_clip_data)
-            else:
-                error_message="Start Frame ["+str(new_clip_data['start_frame'])+"] is higher than End Frame ["+str(new_clip_data['end_frame'])+"]"
-                messagebox.showinfo("ERROR!", error_message,icon=messagebox.ERROR)
-
-        create_new_clip_button = ttk.Button(control_frame, text="Create New Clip",
-                                            command=create_new_clip)
-        create_new_clip_button.grid(row=1, column=4, padx=5, pady=5)
-
-        return video_player,volume_frame,control_frame,time_label
-
-    def new_video_clip(new_clip_data):
-        file_extension = os.path.basename(new_clip_data['source_file']).split('.')[1]
-        base_file = os.path.join(os.path.dirname(json_file),new_clip_data['tape_id']+'.'+file_extension)
-        output_name = new_clip_data['tape_id']+'_'+str(new_clip_data['start_frame'])+'-'+str(new_clip_data['end_frame'])+'.'+file_extension
-        output_path = os.path.join(os.path.dirname(json_file),new_clip_data['tape_id'])
-        import editor
-        try:
-            editor.splitVideo(base_file,new_clip_data['start_ms']/1000,new_clip_data['end_ms']/1000,output_name,output_path)
-        except Exception as e:
-            print(e)
-            return
-        completion_message = f"{output_name} created in {output_path}"
-        messagebox.showinfo("Clip Creation Complete", completion_message,icon=messagebox.INFO)
-        
     def to_previous_segment(current_index, tape_data, video_player):
         video_player.stop()
         current_index = max(0, current_index - 1)
@@ -1716,7 +1884,7 @@ else:
             gui = tk.Toplevel()
             gui.title("Tape Data Editor")
             gui.iconbitmap(tv_ico)
-            gui.geometry("666x933")
+            gui.geometry("900x933")
             launchloop = True
 
             # Bind the window close event to set `gui` to None
@@ -1837,36 +2005,6 @@ else:
             video_player.stop()
         gui.destroy()
         gui = None
-
-    def update_timecode(video_player,timecode,gui_window,frame_offset=0):
-        current_ms = video_player.player.get_time()
-        total_ms = video_player.player.get_length()
-        frame_rate = video_player.player.get_fps()
-
-        current_hours, remaining_minutes = divmod(current_ms // 1000, 3600)
-        current_minutes, current_seconds = divmod(remaining_minutes, 60)
-
-        total_hours, total_remaining_minutes = divmod(total_ms // 1000, 3600)
-        total_minutes, total_seconds = divmod(total_remaining_minutes, 60)
-
-        current_frame = str(int(current_ms / 1000 * frame_rate)+frame_offset)
-        total_frames = str(int(total_ms / 1000 * frame_rate)+frame_offset)
-
-        if int(total_hours) > 0:
-            timecode_string = (
-                f"{current_frame}/{total_frames} | "
-                f"{current_hours:02d}:{current_minutes:02d}:{current_seconds:02d}/"
-                f"{total_hours:02d}:{total_minutes:02d}:{total_seconds:02d}"
-            )
-        else:
-            timecode_string = (
-                f"{current_frame}/{total_frames} | "
-                f"{current_minutes:02d}:{current_seconds:02d}/"
-                f"{total_minutes:02d}:{total_seconds:02d}"
-            )
-        timecode.set(timecode_string)
-        gui_window.after(33, lambda: update_timecode(video_player,timecode,gui_window,frame_offset))
-        return current_ms,current_frame
 
     def create_new_tape(tape_id=None,video_player=None):
         global current_index, tape_data
@@ -2165,7 +2303,7 @@ else:
             clip_navigator = tk.Toplevel()
             clip_navigator.title("Unidentified Clip Navigator")
             clip_navigator.iconbitmap(tv_ico)
-            clip_navigator.geometry("666x850")
+            clip_navigator.geometry("966x850")
             launchloop = True
 
         if not clip_navigator:
@@ -2448,7 +2586,7 @@ else:
         import ytuploader
     window = tk.Tk()
     window.title("VHS Tools")
-    window.geometry("1000x450")
+    window.geometry("1000x1000")
     
     menu_bar = tk.Menu(window)
     help_menu = tk.Menu(menu_bar, tearoff=0)
@@ -2477,8 +2615,8 @@ else:
     }
 
     # Create a text box to display the output
-    output_text = scrolledtext.ScrolledText(window, background="black", foreground="lime", height=15)
-    output_text.grid(row=9, column=0, columnspan=20, rowspan=10, sticky=tk.NSEW)
+    output_text = scrolledtext.ScrolledText(window, background="black", foreground="lime", height=25, wrap ="word")
+    output_text.grid(row=13, column=0, columnspan=20, rowspan=7, sticky=tk.NSEW)
     window.grid_propagate(0)
     redirector = redirect_console_output(output_text)
     banner()
@@ -2564,7 +2702,7 @@ else:
     '''stop_button = tk.Button(window, text="ABORT!", command=stop_execution)
     stop_button.grid(row=2, column=18, columnspan=2, padx=10, sticky=tk.N) ''' 
 
-    launch_button = tk.Button(window, text="Start", command=lambda: launch_script(selected_script.get(),output_text,redirector))
+    launch_button = tk.Button(window, text="Start", command=lambda: launch_script(selected_script.get(),output_text,redirector,window))
     launch_button.grid(row=0, column=18, columnspan=2, padx=10, sticky=tk.NSEW)
     launch_button.config(state=tk.DISABLED)
 
@@ -2577,11 +2715,34 @@ else:
     
     current_index = 0
 
+    letters = defaultdict(list)
+    for tid in tape_ids:
+        abc = tid[:3].upper()
+        letters[abc].append(tid)
+
     edit_menu.add_command(label="Add New Tape...", command=lambda: on_tape_id_selected(None))
 
-    for tid in tape_ids:
-        tapeid_menu.add_command(label=tid, command=lambda tid=tid: on_tape_id_selected(tid))
+    submenus = {}
+
+    for key, value in letters.items():
+        submenu = tk.Menu(edit_menu, tearoff=0)
+        for tid in value:
+            submenu.add_command(label=tid, command=lambda tid=tid: on_tape_id_selected(tid))
+        submenus[key] = submenu
+
+    # Create the main submenu 'Edit Tape Data' to contain the letter submenus
+    tapeid_menu = tk.Menu(edit_menu, tearoff=0)
+
+    # Add each letter submenu to the 'Edit Tape Data' submenu
+    for key, submenu in submenus.items():
+        tapeid_menu.add_cascade(label=key, menu=submenu)
+
+    # Add the 'Edit Tape Data' submenu to the main 'edit_menu'
     edit_menu.add_cascade(label="Edit Tape Data", menu=tapeid_menu)
+
+    #for tid in tape_ids:
+    #    tapeid_menu.add_command(label=tid, command=lambda tid=tid: on_tape_id_selected(tid))
+    #edit_menu.add_cascade(label="Edit Tape Data", menu=tapeid_menu)
  
     edit_menu.add_command(label="Edit Clip Data...", command=edit_clip_data)
     edit_menu.add_command(label="View Unidentified Clips...", command=view_clip_data)

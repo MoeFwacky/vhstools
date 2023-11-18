@@ -41,10 +41,6 @@ if os.name == 'nt':
 else:
     delimeter = '/'
 
-def start_processing():
-    # Call the process_frames function with update_progress as the progress_callback argument
-    process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_callback=update_progress, progress_var=progress_var)
-
 def convert(seconds): 
     try:
         seconds = seconds.split('.')
@@ -196,7 +192,7 @@ def get_eta(start_time,f,total_frames):
 
     return time_elapsed, frames_per_second, time_remaining
 
-def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_label, progress_widget,progress_var):
+def process_frames(videoFile, totalFrames, frameRate, fileDuration, redirector):
     fps = FPS().start()
     video = FileVideoStream(videoFile).start()
     audio = AudioSegment.empty()
@@ -261,10 +257,10 @@ def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_lab
     total_frames_with_progress = int(math.ceil(totalFrames))
     frames_processed = 0
     #print("[INFO] Resetting Progress Bar")
-    if progress_widget != None:
+    if redirector != None:
         #progress_widget['value'] = 0
-        progress_var.set(0)
-        progress_widget['maximum'] = total_frames_with_progress
+        redirector.progress_var.set(0)
+        redirector.progress_widget['maximum'] = total_frames_with_progress
         
     batch_size = 84  # Adjust the batch size as needed
     start_time = time.time()
@@ -299,18 +295,19 @@ def process_frames(videoFile, totalFrames, frameRate, fileDuration, progress_lab
             pass
 
         frames_processed += 1
-        progress_list = get_eta(start_time,f,total_frames_with_progress)
-        progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
+        if redirector != None:
+            progress_list = get_eta(start_time,f,total_frames_with_progress)
+            progress(redirector.progress_widget,frames_processed,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
         '''if progress_widget is not None and frames_processed % batch_size == 0:
             progress_widget['value'] = frames_processed
             progress_widget.update()'''
         #bar()
-    progress_list = get_eta(start_time,f,total_frames_with_progress)
-    # Update progress and output widgets for the remaining frames
-    progress(progress_widget,frames_processed,batch_size,progress_label,progress_list,progress_var)
+    if redirector != None:
+        progress_list = get_eta(start_time,f,total_frames_with_progress)
+        # Update progress and output widgets for the remaining frames
+        progress(redirector.progress_widget,frames_processed,batch_size,redirector.progress_label,progress_list,redirector.progress_var)
     video.stop()
         
-
     return file_data, rgb_values, loudness_values
     
 def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None, redirector=None):
@@ -325,7 +322,7 @@ def scanVideo(videoFile=None, path=os.getcwd(), totalFrames=None, redirector=Non
         #print(frameRate, fileDuration, lengthFormatted)
         totalFrames = round(float(fileDuration*float(frameRate)))
 
-    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration, redirector.progress_label, redirector.progress_widget, redirector.progress_var)
+    file_data, rgb_values, loudness_values = process_frames(videoFile, totalFrames, frameRate, fileDuration, redirector)
     file_data['analysis'] = {'total frames':totalFrames,
         'min_rgb':min(rgb_values),
         'max_rgb':max(rgb_values),

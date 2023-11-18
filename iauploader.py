@@ -3,6 +3,7 @@ import datetime
 import internetarchive
 import json
 import os
+import requests
 import time
 
 if os.name == 'nt':
@@ -110,12 +111,44 @@ def uploadToArchive(files):
 def uploadClipToArchive(file,clip_json_file):
     if file == None:
         directorypath = selectDirectory()
-    j = open(clip_json_file,)
-    tapeData = json.load(j)
+    with open(clip_json_file, 'r') as j:
+        tapeData = json.load(j)
     #thisTape = []
-    for entry in tapeData:
+    for key,entry in enumerate(tapeData):
         if entry["Filename"] == os.path.basename(file):
             thisClip = entry
+            thisKey = key
+            if "Uploaded" in thisClip and "internet archive" in thisClip["Uploaded"]:
+                existing_url = thisClip["Uploaded"]["internet archive"]["url"]
+                print("[ERROR] Archive already exists: "+existing_url)
+                return "Archive Already Exists", "This clip has already been uploaded to the Internet Archive on "+thisClip["Uploaded"]["internet archive"]["datetime"]+'\n'+existing_url
+            else:
+                identifier = thisClip["Tape ID"] + "_" + str(thisClip["Frame Range"][0]) + "-" + str(thisClip["Frame Range"][1])
+                response = requests.head("https://archive.org/details/"+identifier)
+                if response.status_code == 200:
+                    internetarchive.configure(access_key=access_key,secret_key=secret_key)
+                    item = internetarchive.get_item(identifier)
+                    uploaded_datetime = datetime.datetime.fromisoformat(item.metadata['created']).strftime('%Y-%m-%d %H:%M:%S')
+                    uploaded_data = {
+                        "internet archive": {
+                            "url": "https://archive.org/details/"+identifier,
+                            "datetime": uploaded_datetime
+                        }
+                    }
+                    if 'Uploaded' in thisClip:
+                        thisClip['Uploaded'].update(uploaded_data)
+                    else:
+                        thisClip['Uploaded'] = uploaded_data
+                    tapeData[thisKey] = thisClip
+                    with open(clip_json_file, 'w') as file:
+                        json.dump(tapeData, file, indent=4)
+                    already_exists = []
+                    already_exists.append("Archive Already Exists")
+                    already_exists.append("This clip has already been uploaded to the Internet Archive on "+uploaded_datetime+'\n'+"https://archive.org/details/"+identifier)
+                    return already_exists[0],already_exists[1]
+                else:
+                    pass
+            
     #tapeSorted = sorted(thisTape, key=lambda d: d['Order on Tape'])
     metadata = {}
     metadata['title'] = thisClip["Title"] + " " + thisClip["Network/Station"]+ " " + thisClip["Air Date"]
@@ -135,5 +168,22 @@ def uploadClipToArchive(file,clip_json_file):
         print(key+": "+str(value))
     #print("upload("+tape_name+", files="+str(files)+", metadata="+str(metadata)+", verbose=True)")
     u = internetarchive.upload(identifier, files=[file], metadata=metadata, verbose=True, access_key=access_key, secret_key=secret_key)
-    print("UPLOAD COMPLETE AT "+datetime.datetime.now().strftime("%H:%M:%S"),end='\n\n')
+    uploaded_url = "https://archive.org/details/"+identifier
+    uploaded_datetime = datetime.datetime.now()
+    uploaded_data = {
+        "internet archive": {
+            "url": uploaded_url,
+            "datetime": uploaded_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        }
+    }
+    if 'Uploaded' in thisClip:
+        thisClip['Uploaded'].update(uploaded_data)
+    else:
+        thisClip['Uploaded'] = uploaded_data
+    tapeData[thisKey] = thisClip
+    with open(clip_json_file, 'w') as file:
+        json.dump(tapeData, file, indent=4)
+    print("Video uploaded successfully! Video URL: "+uploaded_url)
+    print("UPLOAD COMPLETE AT "+uploaded_datetime.strftime("%H:%M:%S"),end='\n\n')
     print("-----------------------------------------------------")
+    return None

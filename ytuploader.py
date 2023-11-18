@@ -6,7 +6,9 @@ import google_auth_oauthlib.flow
 import hashlib
 import json
 import os
+import pytz
 import re
+import requests
 import secrets
 import threading
 import time
@@ -224,6 +226,7 @@ def uploadToYouTube(file, redirector=None):
                     redirector.progress_widget['maximum'] = 1
                     redirector.progress_var.set(progress)
                     redirector.action_label.config(text="Uploading " + os.path.basename(file) + " to YouTube")
+                    redirector.progress_label_var.set(f"Uploaded {int(progress * 100)}%, {format_time(elapsed_time)}<{estimated_time_string}.")
                     redirector.progress_label.config(text=f"Uploaded {int(progress * 100)}%, {format_time(elapsed_time)}<{estimated_time_string}.")
 
         print("Video uploaded successfully! Video URL: "+"https://www.youtube.com/watch?v="+response["id"])
@@ -251,14 +254,18 @@ def uploadClipToYouTube(file, clip_json_file=None, redirector=None):
     if clip_json_file is None:
         print("[ERROR] Data file not selected")
         return "No Data File Selected", "Select a Clip Data file before starting."
+    with open(clip_json_file, 'r') as j:
+        tapeData = json.load(j)
     
-    j = open(clip_json_file,)
-    tapeData = json.load(j)
-    
-    for entry in tapeData:
+    for key,entry in enumerate(tapeData):
         if entry["Filename"] == os.path.basename(file):
             thisClip = entry
-    
+            thisKey = key
+            if "Uploaded" in thisClip and "youtube" in thisClip["Uploaded"]:
+                existing_url = thisClip["Uploaded"]["youtube"]["url"]
+                print("[ERROR] Youtube URL already exists: "+existing_url)
+                return "Youtube URL Already Exists", "This clip has already been uploaded to YouTube on "+thisClip["Uploaded"]["youtube"]["datetime"]+'\n'+existing_url
+
     metadata = {}
     metadata['title'] = thisClip["Title"] + " " + thisClip["Air Date"]
     metadata['description'] =  thisClip["Description"] + "\n" + thisClip["Network/Station"]+" - "+ thisClip["Location"] + "\n" + "Recorded on: "+ thisClip["Air Date"] + "\n\n" + "Clipped from " + thisClip["Tape ID"] + " frames " + str(thisClip["Frame Range"][0]) +" - "+ str(thisClip["Frame Range"][1])
@@ -268,41 +275,78 @@ def uploadClipToYouTube(file, clip_json_file=None, redirector=None):
     youtube_metadata = {}
     youtube_metadata['snippet'] = metadata
     youtube_metadata['status'] = {"privacyStatus": "public","selfDeclaredMadeForKids":False}
-   
-    try:
-        # Upload the video to YouTube
-        media_file = MediaFileUpload(file, chunksize=1048576, resumable=True)
-        request = youtube.videos().insert(part='snippet,status', body=youtube_metadata, media_body=media_file)
-        response = None
-        start_time = time.time()
-        while response is None:
-            status, response = request.next_chunk()
-            if status:
-                elapsed_time = time.time() - start_time
-                progress = status.progress()
-                estimated_completion_time = (elapsed_time / (progress + 1e-9)) * (1 - progress)
-                estimated_minutes, estimated_seconds = divmod(int(estimated_completion_time), 60)
-                estimated_time_string = f"{estimated_minutes:02d}:{estimated_seconds:02d}"
-                if redirector == None:
-                    print(f"Uploaded {int(status.progress * 100)}%.")
-                else:
-                    redirector.progress_widget['maximum'] = 1
-                    redirector.progress_var.set(progress)
-                    redirector.action_label.config(text="Uploading "+os.path.basename(file)+" to YouTube")
-                    redirector.progress_label.config(text=f"Uploaded {int(progress * 100)}%, {format_time(elapsed_time)}<{estimated_time_string}.")
-        print("Video uploaded successfully! Video URL: "+"https://www.youtube.com/watch?v="+response["id"])
-        print("UPLOAD COMPLETE AT " + datetime.datetime.now().strftime("%H:%M:%S"), end='\n\n')
-        print("-----------------------------------------------------")
-        return None
-    except googleapiclient.errors.HttpError as e:
-        error_details = e.resp
-        error_message = remove_html_tags(e._get_reason())
-        error_code = error_details['status']
-        print(f"HTTP Error {error_code}: {error_message}")
-        print(datetime.datetime.now().strftime("%H:%M:%S"),end='\n\n')
-        print("-----------------------------------------------------")
-        if redirector != None:
-            redirector.progress_var.set(0)
-            redirector.action_label.config(text="")
-            redirector.progress_label.config(text="")
-        return error_code, error_message
+    while True:
+        try:
+            # Upload the video to YouTube
+            media_file = MediaFileUpload(file, chunksize=1048576, resumable=True)
+            request = youtube.videos().insert(part='snippet,status', body=youtube_metadata, media_body=media_file)
+            response = None
+            start_time = time.time()
+            while response is None:
+                status, response = request.next_chunk()
+                if status:
+                    elapsed_time = time.time() - start_time
+                    progress = status.progress()
+                    estimated_completion_time = (elapsed_time / (progress + 1e-9)) * (1 - progress)
+                    estimated_minutes, estimated_seconds = divmod(int(estimated_completion_time), 60)
+                    estimated_time_string = f"{estimated_minutes:02d}:{estimated_seconds:02d}"
+                    if redirector == None:
+                        print(f"Uploaded {int(status.progress * 100)}%.")
+                    else:
+                        redirector.progress_widget['maximum'] = 1
+                        redirector.progress_var.set(progress)
+                        redirector.action_label.config(text="Uploading "+os.path.basename(file)+" to YouTube")
+                        redirector.progress_label.config(text=f"Uploaded {int(progress * 100)}%, {format_time(elapsed_time)}<{estimated_time_string}.")
+            uploaded_url = "https://www.youtube.com/watch?v="+response["id"]
+            uploaded_datetime = datetime.datetime.now()
+            uploaded_data = {
+                "youtube": {
+                    "url": uploaded_url,
+                    "datetime": uploaded_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                }
+            }
+            if 'Uploaded' in thisClip:
+                thisClip['Uploaded'].update(uploaded_data)
+            else:
+                thisClip['Uploaded'] = uploaded_data
+            tapeData[thisKey] = thisClip
+            with open(clip_json_file, 'w') as file:
+                json.dump(tapeData, file, indent=4)
+            print("Video uploaded successfully! Video URL: "+uploaded_url)
+            print("UPLOAD COMPLETE AT " + uploaded_datetime.strftime("%H:%M:%S"), end='\n\n')
+            print("-----------------------------------------------------")
+            return None
+        except googleapiclient.errors.HttpError as e:
+            error_details = e.resp
+            error_message = remove_html_tags(e._get_reason())
+            error_code = error_details['status']
+            print(f"HTTP Error {error_code}: {error_message}")
+            print(datetime.datetime.now().strftime("%H:%M:%S"),end='\n\n')
+            print("-----------------------------------------------------")
+            if redirector != None:
+                redirector.progress_var.set(0)
+                redirector.action_label.config(text="")
+                redirector.progress_label.config(text="")
+                if error_code == '403' and 'quota' in error_message.lower():
+                    # Quota limit exceeded, show the alert
+
+                    response = messagebox.askquestion(
+                        "API Quota Limit Exceeded",
+                        "Your YouTube API quota limit has been reached. Do you want to wait until reset at midnight Pacific Time or abort the upload?",
+                        icon='warning'
+                    )
+
+                    if response == 'no':
+                        # User chose to abort the upload
+                        return "API Quota Reached", "Upload Aborted"
+                    else:
+                        # User chose to wait
+                        print("[ACTION] Waiting until midnight Pacific Time...")
+                        pacific_tz = pytz.timezone('US/Pacific')
+                        current_time_utc = datetime.datetime.utcnow()
+                        current_time_pacific = current_time_utc.astimezone(pacific_tz)
+                        midnight_pacific = current_time_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+                        midnight_pacific += datetime.timedelta(days=1)
+                        time_remaining = midnight_pacific - current_time_pacific
+                        time.sleep(time_remaining)
+                        continue

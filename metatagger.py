@@ -122,7 +122,7 @@ def createMetadata(filename,outputPath,metadata,outputFile):
                     'metadata:g:1':"date="+metadata['Air Date'],
                     'metadata:g:2':"genre="+metadata['Tags'],
                     'metadata:g:3':"network="+metadata['Network/Station'],
-                    'metadata:g:4':"synopsis="+metadata['Tape ID'],
+                    'metadata:g:4':"synopsis="+metadata['Description']+'\n'+metadata['Location']+'\n'+metadata['Tape ID'],
                     'metadata:g:5':"episode_id="+str(metadata['Frame Range'][0]),
                     'metadata:g:6':"comment="+metadata['Location']+'\n'+metadata['Description'],
                 }
