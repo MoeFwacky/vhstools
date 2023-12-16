@@ -1,3 +1,4 @@
+import ast
 import base64
 import configparser
 import cv2
@@ -31,7 +32,7 @@ from difflib import SequenceMatcher
 from google.cloud import vision
 from moviepy.editor import AudioFileClip
 #from nltk.corpus import words
-from openai import RateLimitError
+from openai import RateLimitError, BadRequestError, InternalServerError, APITimeoutError
 from skimage.metrics import structural_similarity as ssim
 #from spellchecker import SpellChecker
 from tkinter import ttk
@@ -615,7 +616,9 @@ def generate_summary(audio_text,metadata,frames):
     content = [{"type": "text","text": video_context}]
     for frame in frames:
         content.append({"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{frame}","detail":config['analysis']['vision detail level']}})
+    loops = 0
     while True:
+        loops += 1
         try:
             response=openai_client.chat.completions.create(
               model=config['analysis']['gpt model'],
@@ -628,11 +631,74 @@ def generate_summary(audio_text,metadata,frames):
             )
             break
         except RateLimitError as e:
-            print(e)
-            retry_at = datetime.datetime.now()+datetime.timedelta(minutes=15)
-            retry_at_str = retry_at.strftime('%H:%M:%S')
-            print("Retrying at "+retry_at_str)
-            time.sleep(900)
+            error_message = e.message
+            try:
+                match = re.search(r"'message': '(.*?)'", error_message)
+                if match:
+                    error_text = match.group(1)
+                    print("[ERROR] "+ error_text)
+
+                
+                # Implement your retry logic based on the error information
+                time_pattern = re.compile(r'in (\d+m\d+s)')
+                match = time_pattern.search(error_text)
+
+                if match:
+                    time_to_wait = match.group(1)
+                    seconds_to_wait = int(time_to_wait.split('m')[0]) * 60 + int(time_to_wait.split('m')[1].rstrip('s'))
+                else:
+                    seconds_to_wait = 15 * 60
+
+                retry_at = datetime.datetime.now() + datetime.timedelta(seconds=seconds_to_wait)
+                retry_at_str = retry_at.strftime('%H:%M:%S')
+                print("[INFO] Retrying at " + retry_at_str)
+                time.sleep(seconds_to_wait)
+
+            except Exception as e:
+                print(e)
+                #print(error_message)
+                retry_at = datetime.datetime.now()+datetime.timedelta(minutes=15)
+                retry_at_str = retry_at.strftime('%H:%M:%S')
+                print("[INFO] Retrying at "+retry_at_str)
+                time.sleep(900)
+        except BadRequestError as e:
+            error_message = e.message
+            match = re.search(r"'message': '(.*?)'", error_message)
+            if match:
+                error_text = match.group(1)
+                print("[ERROR] "+ error_text)
+            if loops < 3:
+                code_match = re.search(r"'code': '(.*?)'", error_message)
+                if code_match:
+                    code = code_match.group(1)
+                    if code == "content_policy_violation":
+                        content = [{"type": "text","text": video_context}]
+                retry_at = datetime.datetime.now()+datetime.timedelta(seconds=loops*loops)
+                retry_at_str = retry_at.strftime('%H:%M:%S')
+                print("[INFO] Retrying at "+retry_at_str)
+                time.sleep(loops*loops)
+            else:
+                if loops <= 5:
+                    retries = loops - 2
+                    retry_at = datetime.datetime.now()+datetime.timedelta(seconds=retries*retries)
+                    retry_at_str = retry_at.strftime('%H:%M:%S')
+                    print("[INFO] Retrying at "+retry_at_str)
+                    time.sleep(retries*retries)
+                else:
+                    break
+        except (APITimeoutError, InternalServerError) as e:
+            error_message = e.message
+            match = re.search(r"'message': '(.*?)'", error_message)
+            if match:
+                error_text = match.group(1)
+                print("[ERROR] "+ error_text)
+            if loops <= 6:
+                retry_at = datetime.datetime.now()+datetime.timedelta(seconds=loops*loops)
+                retry_at_str = retry_at.strftime('%H:%M:%S')
+                print("[INFO] Retrying at "+retry_at_str)
+                time.sleep(loops*loops)
+            else:
+                break
     #print(response)
     finish_details = response.choices[0].finish_details['type']
     summary = response.choices[0].message.content

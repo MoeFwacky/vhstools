@@ -176,11 +176,11 @@ class TextRedirector(io.TextIOBase):
         self.progress_label_var = tk.StringVar()
         self.progress_label_var.set('')
         self.progress_label = tk.Label(window, text='')
-        self.progress_label.grid(row=12, column=11, columnspan=8, sticky=tk.W)
+        self.progress_label.grid(row=12, column=10, columnspan=9, sticky=tk.W)
         
         self.progress_var = tk.IntVar()
         self.progress_widget = ttk.Progressbar(window, variable=self.progress_var, orient=tk.HORIZONTAL, length=500, mode='determinate')
-        self.progress_widget.grid(row=12, column=0, columnspan=18, sticky=tk.SW)
+        self.progress_widget.grid(row=12, column=0, columnspan=10, sticky=tk.SW)
         
         self.label_label = tk.Label(window, text="File or Directory:", font=("TkDefaultFont", 10, "bold"))
         self.label_label.grid(row=2, column=0, columnspan=2, sticky=tk.W)
@@ -546,6 +546,7 @@ def launch_identifier(file=None,directory=None,redirector=None,window=None):
         messagebox.showinfo("Clip Identification Complete", f"Clip Identification Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
     else: 
         print(f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
+
 def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_clip=False,clip_json_file=None):
     import iauploader
     print("::::::: █████╗ ██████╗  ██████╗██╗  ██╗██╗██╗   ██╗███████╗::::::::")
@@ -564,7 +565,7 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
             if args.video == True or is_video == True:
                 status = iauploader.uploadToArchive([file])
             elif args.clip == True or is_clip == True:
-                status = iauploader.uploadClipToArchive(file,clip_json_file)
+                status = iauploader.uploadClipToArchive(file,clip_json_file,redirector)
         elif directory != None:
             dirContents = os.scandir(directory)
             videos = []
@@ -575,12 +576,12 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
                     if args.video == True or is_video == True:
                         status = iauploader.uploadToArchive([entry.name])
                     elif args.clip == True or is_clip == True:
-                        status = iauploader.uploadClipToArchive(os.path.join(directory,entry.name),clip_json_file)
+                        status = iauploader.uploadClipToArchive(os.path.join(directory,entry.name),clip_json_file,redirector)
         else:
             if args.video == True or is_video == True:
                 status = iauploader.uploadToArchive(None)
             elif args.clip == True or is_clip == True:
-                status = iauploader.uploadClipToArchive(None)
+                status = iauploader.uploadClipToArchive(None,redirector)
     else:
         print("[ERROR] Video Type not Specified")
     ending_time = datetime.datetime.now()
@@ -596,7 +597,13 @@ def launch_archiver(file=None,directory=None,redirector=None,is_video=False,is_c
             global current_index
             with open(clip_json_file, "r") as clip_data:
                 clip_data = json.load(clip_data) 
-            show_clip_details(clip_data[current_index], clip_data, current_index, os.path.dirname(clip_json_file))
+            try:
+                if not clip_editor:
+                    pass
+                else:
+                    show_clip_details(clip_data[current_index], clip_data, current_index, os.path.dirname(clip_json_file))
+            except RuntimeError:
+                pass
             if time_hours < 1:
                 redirector.progress_label.config(text=f"Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds")
                 messagebox.showerror("Archive Complete", f"Internet Archive Upload Complete in {int(time_minutes):d} minutes, {int(time_seconds):d} seconds",icon=messagebox.INFO)
@@ -2595,6 +2602,7 @@ else:
     tapeid_menu = tk.Menu(menu_bar, tearoff=0)
     
     menu_bar.configure(background="lightgrey")
+
     help_menu.add_command(label="About", command=show_about_dialog)
     
     window.config(menu=menu_bar)
